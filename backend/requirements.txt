@@ -23,7 +23,5 @@ pyOpenSSL==24.1.0
 dnspython==2.6.1
 tldextract==5.1.2
 validators==0.28.1
-playwright==1.44.0
 slowapi==0.1.9
-pytest==8.2.2
 mangum==0.22.0

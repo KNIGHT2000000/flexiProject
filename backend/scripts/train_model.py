@@ -19,6 +19,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.feature_extractor import extract_features, features_to_vector
 
 
@@ -142,9 +143,12 @@ def train(dataset_path=None):
     print("\nClassification Report:")
     print(classification_report(y_test, y_pred, target_names=["legitimate", "suspicious", "phishing"]))
 
-    out_path = Path(__file__).parent / "model.pkl"
-    joblib.dump(model, out_path)
-    print(f"\nModel saved to {out_path}")
+    # Save to backend root (expected by app.routers.scan) and scripts directory
+    backend_root_path = Path(__file__).parent.parent / "model.pkl"
+    scripts_path = Path(__file__).parent / "model.pkl"
+    joblib.dump(model, backend_root_path)
+    joblib.dump(model, scripts_path)
+    print(f"\nModel saved to {backend_root_path} and {scripts_path}")
 
 
 if __name__ == "__main__":

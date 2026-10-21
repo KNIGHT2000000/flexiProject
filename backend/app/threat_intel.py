@@ -3,7 +3,7 @@ import socket
 import ssl
 import whois
 import difflib
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from typing import Optional
 from app.config import get_settings
@@ -60,7 +60,27 @@ def check_whois(url: str) -> dict:
     try:
         parsed = urlparse(url)
         domain = parsed.netloc.replace("www.", "").split(":")[0]
-        w = whois.whois(domain)
+        if not domain:
+            return {"error": "Empty domain", "domain": ""}
+
+        # Avoid hanging on raw IP addresses or localhost
+        import ipaddress
+        try:
+            ipaddress.ip_address(domain)
+            return {"error": "WHOIS lookup not applicable for raw IP addresses", "domain": domain}
+        except ValueError:
+            pass
+
+        if "." not in domain or domain.endswith(".local") or domain == "localhost":
+            return {"error": "WHOIS lookup not applicable for non-public domains", "domain": domain}
+
+        # Set bounded socket timeout to avoid hanging for 15+ seconds
+        orig_timeout = socket.getdefaulttimeout()
+        try:
+            socket.setdefaulttimeout(3.5)
+            w = whois.whois(domain)
+        finally:
+            socket.setdefaulttimeout(orig_timeout)
 
         creation = w.creation_date
         expiry = w.expiration_date
@@ -69,19 +89,22 @@ def check_whois(url: str) -> dict:
         if isinstance(expiry, list):
             expiry = expiry[0]
 
+        now_utc = datetime.now(timezone.utc)
         domain_age_days = None
         if creation:
-            domain_age_days = (datetime.utcnow() - creation).days
+            # Normalize to naive UTC for safe arithmetic if creation has tz or not
+            c_naive = creation.replace(tzinfo=None) if hasattr(creation, "tzinfo") and creation.tzinfo else creation
+            domain_age_days = (now_utc.replace(tzinfo=None) - c_naive).days
 
         return {
             "domain": domain,
-            "registrar": w.registrar,
+            "registrar": getattr(w, "registrar", None),
             "creation_date": creation.isoformat() if creation else None,
             "expiry_date": expiry.isoformat() if expiry else None,
             "domain_age_days": domain_age_days,
             "is_new_domain": domain_age_days is not None and domain_age_days < 180,
-            "country": w.country,
-            "org": w.org,
+            "country": getattr(w, "country", None),
+            "org": getattr(w, "org", None),
         }
     except Exception as e:
         return {"error": str(e), "domain": urlparse(url).netloc}
@@ -95,15 +118,25 @@ def check_ssl(url: str) -> dict:
         if parsed.scheme != "https":
             return {"has_ssl": False, "error": "URL does not use HTTPS"}
 
+        if not hostname:
+            return {"has_ssl": False, "error": "No hostname found"}
+
+        # Prevent connecting to internal/private addresses
+        from app.ssrf_protection import is_safe_host
+        safe, reason = is_safe_host(hostname)
+        if not safe:
+            return {"has_ssl": False, "error": f"Target host blocked by SSRF firewall: {reason}"}
+
         ctx = ssl.create_default_context()
         with ctx.wrap_socket(socket.socket(), server_hostname=hostname) as s:
-            s.settimeout(5)
+            s.settimeout(4.0)
             s.connect((hostname, 443))
             cert = s.getpeercert()
 
         not_after = datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z")
         not_before = datetime.strptime(cert["notBefore"], "%b %d %H:%M:%S %Y %Z")
-        days_left = (not_after - datetime.utcnow()).days
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        days_left = (not_after - now_naive).days
         issuer = dict(x[0] for x in cert.get("issuer", []))
         subject = dict(x[0] for x in cert.get("subject", []))
 
@@ -124,26 +157,9 @@ def check_ssl(url: str) -> dict:
 
 
 async def trace_redirects(url: str) -> list[str]:
-    """Follow redirect chain and return each hop URL."""
-    chain = [url]
-    try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=10,
-            max_redirects=10,
-        ) as client:
-            resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
-            # collect redirect history
-            for r in resp.history:
-                loc = str(r.headers.get("location", ""))
-                if loc and loc not in chain:
-                    chain.append(loc)
-            final = str(resp.url)
-            if final not in chain:
-                chain.append(final)
-    except Exception:
-        pass
-    return chain
+    """Safe redirect tracing delegated to SSRF-protected tracer."""
+    from app.ssrf_protection import safe_trace_redirects
+    return await safe_trace_redirects(url, max_hops=3, timeout_sec=2.0)
 
 
 def check_typosquatting(url: str) -> list[dict]:

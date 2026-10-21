@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Any
 from datetime import datetime
 
@@ -38,11 +38,11 @@ class TokenData(BaseModel):
 
 # ── Scan ──────────────────────────────────────────────────────────────────────
 class URLScanRequest(BaseModel):
-    url: str
+    url: str = Field(..., min_length=1, max_length=2048, description="Target URL string to inspect")
 
 
 class BulkScanRequest(BaseModel):
-    urls: list[str]
+    urls: list[str] = Field(..., min_length=1, max_length=50, description="List of target URLs to inspect (max 50)")
 
 
 class ScanResult(BaseModel):

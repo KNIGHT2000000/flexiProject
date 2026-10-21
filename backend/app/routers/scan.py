@@ -14,19 +14,31 @@ from app.auth import get_current_user
 from app.feature_extractor import extract_features, features_to_vector
 from app.threat_intel import (
     check_virustotal, check_whois, check_ssl,
-    trace_redirects, check_typosquatting, capture_screenshot, generate_recommendations,
+    check_typosquatting, capture_screenshot, generate_recommendations,
 )
+from app.url_utils import validate_and_normalize_url, redact_sensitive_url
+from app.ssrf_protection import safe_trace_redirects, is_safe_host
+from app.risk_engine import aggregate_risk, evaluate_heuristics
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
 
-MODEL_PATH = Path(__file__).parent.parent.parent / "model.pkl"
+MODEL_PATHS = [
+    Path(__file__).parent.parent.parent / "model.pkl",
+    Path(__file__).parent.parent.parent / "scripts" / "model.pkl",
+]
 _model = None
 
 
 def get_model():
     global _model
-    if _model is None and MODEL_PATH.exists():
-        _model = joblib.load(MODEL_PATH)
+    if _model is None:
+        for p in MODEL_PATHS:
+            if p.exists():
+                try:
+                    _model = joblib.load(p)
+                    break
+                except Exception:
+                    continue
     return _model
 
 
@@ -35,29 +47,18 @@ def predict_url(features: dict) -> tuple[str, float]:
     vector = features_to_vector(features)
 
     if model:
-        proba = model.predict_proba([vector])[0]
-        pred_class = int(np.argmax(proba))
-        risk_score = float(proba[1] * 0.5 + proba[2]) * 100
-        label_map = {0: "legitimate", 1: "suspicious", 2: "phishing"}
-        return label_map[pred_class], round(risk_score, 1)
+        try:
+            proba = model.predict_proba([vector])[0]
+            pred_class = int(np.argmax(proba))
+            risk_score = float(proba[1] * 0.5 + proba[2]) * 100
+            label_map = {0: "legitimate", 1: "suspicious", 2: "phishing"}
+            return label_map[pred_class], round(risk_score, 1)
+        except Exception:
+            pass
 
     # Heuristic fallback
-    score = 0
-    if features.get("has_ip_address"):       score += 30
-    if features.get("has_at_symbol"):        score += 20
-    if not features.get("uses_https"):       score += 15
-    score += features.get("has_suspicious_keywords", 0) * 8
-    if features.get("has_suspicious_tld"):   score += 20
-    if features.get("num_dots", 0) > 5:      score += 10
-    if features.get("has_hyphen_in_domain"): score += 10
-    if features.get("url_length", 0) > 100:  score += 10
-    if features.get("has_hex_encoding"):     score += 15
-    if features.get("has_punycode"):         score += 20
-    if features.get("has_non_standard_port"):score += 15
-    if features.get("num_subdomains", 0) > 3:score += 10
-
-    score = min(score, 100)
-    return ("phishing" if score >= 60 else "suspicious" if score >= 30 else "legitimate"), round(float(score), 1)
+    pred, score, _ = evaluate_heuristics(features)
+    return pred, score
 
 
 def _is_whitelisted(url: str, db: Session, user_id: int) -> bool:
@@ -75,44 +76,75 @@ def _is_whitelisted(url: str, db: Session, user_id: int) -> bool:
 
 async def _run_scan(url: str, db: Session, user_id=None, with_screenshot: bool = False) -> schemas.ScanResult:
     """Core scan logic shared by single-scan and bulk-scan endpoints."""
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
+    # 1. Strict URL validation & RFC normalization
+    val = validate_and_normalize_url(url)
+    if not val.is_valid:
+        raise HTTPException(status_code=400, detail=val.error_message or "Invalid URL provided.")
 
-    # Check banned domains
+    target_url = val.normalized_url
+
+    # 2. Check banned domains
     import tldextract as _tld
-    _ext = _tld.extract(url)
-    _domain = f"{_ext.domain}.{_ext.suffix}".lower()
+    _ext = _tld.extract(target_url)
+    _domain = f"{_ext.domain}.{_ext.suffix}".lower() if _ext.domain else val.ascii_hostname
     banned = db.query(models.BannedDomain).filter(models.BannedDomain.domain == _domain).first()
     if banned:
+        reason = banned.reason or 'Flagged by admin'
         return schemas.ScanResult(
-            url=url, prediction="phishing", risk_score=100.0,
-            features={}, recommendations=[f"Domain is on the global ban list: {banned.reason or 'Flagged by admin'}"],
+            url=target_url, prediction="phishing", risk_score=100.0,
+            features={}, recommendations=[f"Domain is on the global ban list: {reason}"],
         )
 
-    # Whitelist short-circuit
-    if user_id and _is_whitelisted(url, db, user_id):
-        features = extract_features(url)
+    # 3. Whitelist short-circuit
+    if user_id and _is_whitelisted(target_url, db, user_id):
+        features = extract_features(target_url)
         return schemas.ScanResult(
-            url=url, prediction="legitimate", risk_score=0.0,
+            url=target_url, prediction="legitimate", risk_score=0.0,
             features=features, recommendations=["Domain is on your whitelist."],
         )
 
-    features = extract_features(url)
-    prediction, risk_score = predict_url(features)
+    # 4. Feature extraction & ML vector
+    features = extract_features(target_url)
+    vector = features_to_vector(features)
+    model = get_model()
 
-    vt_result = await check_virustotal(url)
-    whois_result = check_whois(url)
-    ssl_result = check_ssl(url)
-    redirect_chain = await trace_redirects(url)
-    typosquatting = check_typosquatting(url)
-    screenshot = await capture_screenshot(url) if with_screenshot else None
-    recommendations = generate_recommendations(
-        prediction, risk_score, features, whois_result, ssl_result,
-        redirect_chain, typosquatting,
+    # 5. External threat intelligence with safe SSRF protections & timeouts
+    vt_result = await check_virustotal(target_url)
+    whois_result = check_whois(target_url)
+    ssl_result = check_ssl(target_url)
+    redirect_chain = await safe_trace_redirects(target_url, max_hops=3, timeout_sec=2.0)
+    typosquatting = check_typosquatting(target_url)
+
+    screenshot = None
+    if with_screenshot:
+        safe_host, _ = is_safe_host(val.hostname)
+        if safe_host:
+            screenshot = await capture_screenshot(target_url)
+
+    # 6. Aggregated risk assessment
+    assessment = aggregate_risk(
+        features=features,
+        ml_model=model,
+        vector=vector,
+        validation_result=val,
+        virustotal_data=vt_result,
+        whois_data=whois_result,
+        ssl_data=ssl_result,
+        redirect_chain=redirect_chain,
+        typosquatting=typosquatting,
+        is_whitelisted=False,
+        banned_reason=None,
     )
 
+    prediction = assessment.prediction
+    risk_score = assessment.risk_score
+    recommendations = assessment.recommendations
+
+    # 7. Privacy: sanitize sensitive tokens/credentials from URL before saving to history
+    stored_url = redact_sensitive_url(target_url)
+
     scan = models.ScanHistory(
-        url=url,
+        url=stored_url,
         prediction=prediction,
         risk_score=risk_score,
         features=json.dumps(features),
@@ -127,10 +159,10 @@ async def _run_scan(url: str, db: Session, user_id=None, with_screenshot: bool =
     db.commit()
 
     if user_id and risk_score >= 60:
-        _maybe_send_alert(db, user_id, url, prediction, risk_score)
+        _maybe_send_alert(db, user_id, target_url, prediction, risk_score)
 
     return schemas.ScanResult(
-        url=url, prediction=prediction, risk_score=risk_score,
+        url=target_url, prediction=prediction, risk_score=risk_score,
         features=features, virustotal=vt_result, whois=whois_result,
         ssl=ssl_result, redirect_chain=redirect_chain,
         typosquatting=typosquatting, screenshot=screenshot,
@@ -219,9 +251,23 @@ async def scan_qr_code(
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"QR scanning unavailable: {e}")
 
+    # Enforce maximum 5MB file upload limit
+    MAX_QR_BYTES = 5 * 1024 * 1024
     contents = await file.read()
-    image = Image.open(io.BytesIO(contents))
-    decoded = qr_decode(image)
+    if len(contents) > MAX_QR_BYTES:
+        raise HTTPException(status_code=400, detail="Uploaded QR image exceeds maximum size of 5MB")
+
+    try:
+        image = Image.open(io.BytesIO(contents))
+        # Protect against decompression bombs / excessive image dimensions
+        if image.width > 4000 or image.height > 4000:
+            raise HTTPException(status_code=400, detail="Image dimensions exceed maximum allowed (4000x4000)")
+        decoded = qr_decode(image)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to process image: {e}")
+
     if not decoded:
         raise HTTPException(status_code=400, detail="No QR code detected in image")
 
@@ -256,7 +302,7 @@ def get_history(
 
 @router.get("/history/export")
 def export_history(
-    fmt: str = Query("csv", regex="^(csv|json)$"),
+    fmt: str = Query("csv", pattern="^(csv|json)$"),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):

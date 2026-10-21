@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Train model with synthetic data if no model exists
-RUN python train_model.py || echo "Model training skipped"
+RUN python scripts/train_model.py || python train_model.py || echo "Model training skipped"
 
 EXPOSE 8000
 

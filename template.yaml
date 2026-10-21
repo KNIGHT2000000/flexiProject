@@ -1,0 +1,238 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  PhishGuard Cloud - Enterprise AI Phishing Detection & Threat Intelligence Platform.
+  Serverless Architecture: API Gateway HTTP API, FastAPI Lambda Backend (Mangum),
+  S3 Private Origin with CloudFront OAC, and CloudWatch Logs.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - staging
+      - prod
+    Description: Deployment stage environment identifier (staging or prod).
+
+  CorsAllowedOrigins:
+    Type: String
+    Default: '*'
+    Description: Comma-separated list of allowed origins for API Gateway CORS (or '*' for all).
+
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    Default: 'phishguard-production-jwt-signing-secret-key-change-in-prod-min-32-chars'
+    Description: HMAC SHA-256 JWT signing secret key (must be at least 32 characters in production).
+
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Default: 'sqlite:////tmp/phishguard.db'
+    Description: SQLAlchemy connection string. Defaults to serverless SQLite on ephemeral /tmp. Set to PostgreSQL URI for persistent multi-instance production.
+
+  VirusTotalApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional VirusTotal v3 API key for live external threat scans.
+
+  GoogleSafeBrowsingApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: Optional Google Safe Browsing / Web Risk API key.
+
+  LogRetentionInDays:
+    Type: Number
+    Default: 14
+    AllowedValues:
+      - 7
+      - 14
+      - 30
+      - 60
+      - 90
+    Description: CloudWatch log group retention period in days.
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 512
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        DATABASE_URL: !Ref DatabaseUrl
+        SECRET_KEY: !Ref JwtSecret
+        CORS_ORIGINS: !Ref CorsAllowedOrigins
+        VIRUSTOTAL_API_KEY: !Ref VirusTotalApiKey
+        GOOGLE_SAFE_BROWSING_API_KEY: !Ref GoogleSafeBrowsingApiKey
+        RATE_LIMIT: '60'
+        RATE_WINDOW: '60'
+
+Resources:
+  # ── API Gateway HTTP API ───────────────────────────────────────────────────
+  ApiGatewayApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref CorsAllowedOrigins
+        AllowHeaders:
+          - '*'
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        ExposeHeaders:
+          - X-Request-ID
+        MaxAge: 600
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+
+  # ── FastAPI Backend Lambda Function ─────────────────────────────────────────
+  FastApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'phishguard-api-${Environment}'
+      Description: Core FastAPI backend for phishing link classification and threat correlation
+      CodeUri: backend/
+      Handler: app.lambda_handler.handler
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        RootRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGatewayApi
+            Path: /
+            Method: ANY
+        ProxyRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref ApiGatewayApi
+            Path: /{proxy+}
+            Method: ANY
+
+  # ── CloudWatch Log Group for Lambda ─────────────────────────────────────────
+  FastApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/phishguard-api-${Environment}'
+      RetentionInDays: !Ref LogRetentionInDays
+
+  # ── S3 Private Bucket for React Static Assets ───────────────────────────────
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'phishguard-frontend-${AWS::AccountId}-${AWS::Region}-${Environment}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ── CloudFront Origin Access Control (OAC) ──────────────────────────────────
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'phishguard-oac-${Environment}'
+        Description: Origin Access Control for PhishGuard static assets S3 bucket
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ── CloudFront Distribution for React SPA ───────────────────────────────────
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'PhishGuard Cloud React Frontend CDN (${Environment})'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig: {}
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          CachedMethods:
+            - GET
+            - HEAD
+          Compress: true
+          # AWS Managed-CachingOptimized Cache Policy ID
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88637419eb
+        CustomErrorResponses:
+          # Client-side routing support for React Single Page Application (SPA)
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+
+  # ── S3 Bucket Policy (Restricts S3 Access strictly to CloudFront OAC) ────────
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+Outputs:
+  ApiEndpoint:
+    Description: HTTP API Gateway base URL for API invocations
+    Value: !Sub 'https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+    Export:
+      Name: !Sub '${AWS::StackName}-ApiEndpoint'
+
+  FastApiFunctionArn:
+    Description: IAM ARN of the core FastAPI Lambda function
+    Value: !GetAtt FastApiFunction.Arn
+
+  CloudFrontDistributionId:
+    Description: CloudFront Distribution ID for CDN cache invalidations
+    Value: !Ref FrontendDistribution
+
+  CloudFrontDomain:
+    Description: CloudFront CDN distribution domain name for end-user web access
+    Value: !GetAtt FrontendDistribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudFrontDomain'
+
+  FrontendBucketName:
+    Description: Private S3 Bucket name for static React asset deployment
+    Value: !Ref FrontendBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-FrontendBucketName'

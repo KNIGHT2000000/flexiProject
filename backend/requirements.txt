@@ -26,4 +26,4 @@ validators==0.28.1
 playwright==1.44.0
 slowapi==0.1.9
 pytest==8.2.2
-httpx==0.27.0
+mangum==0.22.0

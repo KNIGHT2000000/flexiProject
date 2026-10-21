@@ -82,7 +82,64 @@ OpenAPI Documentation: `http://localhost:8000/docs`
 
 ---
 
-## 3. URL & Threat Scanning (`/api/scan`)
+## 3. Cloud-Native URL Analysis (`POST /analyze`)
+
+The `/analyze` endpoint (alias `/api/analyze`) provides a modernized, AWS-optimized interface returning structured risk levels, provider status summaries, and request correlation IDs.
+
+- **Method**: `POST /analyze` (or `POST /api/analyze`)
+- **Headers**:
+  - `X-Request-ID`: Optional client request ID. If omitted, the API generates a UUIDv4 and returns it in the response header and body.
+- **Request Body**:
+  ```json
+  {
+    "url": "https://example.com",
+    "include_screenshot": false,
+    "include_details": true
+  }
+  ```
+- **Response `200 OK`**:
+  ```json
+  {
+    "request_id": "c76f9ef0-0329-4d6d-88b9-8e27c0e62057",
+    "url": "https://example.com/",
+    "prediction": "legitimate",
+    "risk_score": 0.0,
+    "risk_level": "LOW",
+    "analyzed_at": "2026-10-21T08:20:00Z",
+    "engine_version": "2.1.0",
+    "features": {
+      "url_length": 20,
+      "domain_length": 11,
+      "uses_https": 1
+    },
+    "evidence": [
+      {
+        "source": "ml_random_forest",
+        "status": "no_threat_match",
+        "description": "Random Forest model classified as legitimate (ML risk: 0.0%)",
+        "weight": 0.0
+      }
+    ],
+    "providers": {
+      "ml_model": "ok",
+      "virustotal": "unavailable",
+      "whois": "ok",
+      "ssl": "ok"
+    },
+    "redirect_chain": [
+      "https://example.com/"
+    ],
+    "typosquatting": [],
+    "screenshot": null,
+    "recommendations": [
+      "No immediate threats detected. Always stay vigilant online."
+    ]
+  }
+  ```
+
+---
+
+## 4. Legacy URL & Threat Scanning (`/api/scan`)
 
 ### 3.1 Scan Single URL
 - **Method**: `POST /api/scan/url`

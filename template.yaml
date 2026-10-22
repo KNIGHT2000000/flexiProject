@@ -179,8 +179,13 @@ Resources:
             - GET
             - HEAD
           Compress: true
-          # AWS Managed-CachingOptimized Cache Policy ID
-          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88637419eb
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MinTTL: 0
+          DefaultTTL: 86400
+          MaxTTL: 31536000
         CustomErrorResponses:
           # Client-side routing support for React Single Page Application (SPA)
           - ErrorCode: 403

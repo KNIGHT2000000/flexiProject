@@ -259,9 +259,8 @@ async def scan_qr_code(
 ):
     try:
         from PIL import Image
-        from pyzbar.pyzbar import decode as qr_decode
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"QR scanning unavailable: {e}")
+        raise HTTPException(status_code=503, detail=f"Image processing unavailable: {e}")
 
     # Enforce maximum 5MB file upload limit
     MAX_QR_BYTES = 5 * 1024 * 1024
@@ -274,16 +273,36 @@ async def scan_qr_code(
         # Protect against decompression bombs / excessive image dimensions
         if image.width > 4000 or image.height > 4000:
             raise HTTPException(status_code=400, detail="Image dimensions exceed maximum allowed (4000x4000)")
-        decoded = qr_decode(image)
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to process image: {e}")
 
-    if not decoded:
-        raise HTTPException(status_code=400, detail="No QR code detected in image")
+    url = None
 
-    url = decoded[0].data.decode("utf-8")
+    # Primary Engine: pyrxing (Self-contained statically-linked Rust reader, zero system C dependencies)
+    try:
+        import pyrxing
+        result = pyrxing.read_barcode(image)
+        if result and getattr(result, "text", None):
+            url = result.text.strip()
+    except Exception:
+        pass
+
+    # Secondary Engine: pyzbar fallback
+    if not url:
+        try:
+            from pyzbar.pyzbar import decode as qr_decode
+            decoded = qr_decode(image)
+            if decoded and decoded[0].data:
+                url = decoded[0].data.decode("utf-8").strip()
+        except Exception:
+            pass
+
+    if not url:
+        raise HTTPException(
+            status_code=400,
+            detail="No QR code detected in image. Ensure the code is clearly visible, well-lit, and in focus."
+        )
+
     return await _run_scan(url, db, current_user.id if current_user else None)
 
 

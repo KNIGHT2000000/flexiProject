@@ -110,6 +110,15 @@ jobs:
       - name: Deploy SAM Stack to AWS
         run: |
           STACK_NAME="phishguard-cloud-${{ env.ENVIRONMENT }}"
+          STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --region "${{ env.AWS_REGION }}" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+          echo "Current stack status: ${STATUS}"
+          if [ "${STATUS}" = "ROLLBACK_COMPLETE" ]; then
+            echo "Deleting previous rolled-back stack before fresh deployment..."
+            aws cloudformation delete-stack --stack-name "${STACK_NAME}" --region "${{ env.AWS_REGION }}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}" --region "${{ env.AWS_REGION }}"
+            echo "Previous stack deleted successfully."
+          fi
+
           sam deploy \
             --stack-name "${STACK_NAME}" \
             --region "${{ env.AWS_REGION }}" \

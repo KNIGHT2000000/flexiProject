@@ -28,6 +28,13 @@ sam build --template template.yaml
 
 # 3. Deploy SAM Stack
 echo -e "\n[3/5] Deploying CloudFormation stack '${STACK_NAME}'..."
+EXISTING_STATUS=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --region "${REGION}" --query "Stacks[0].StackStatus" --output text 2>/dev/null || echo "DOES_NOT_EXIST")
+if [ "${EXISTING_STATUS}" = "ROLLBACK_COMPLETE" ]; then
+  echo "  [*] Deleting previous rolled-back stack..."
+  aws cloudformation delete-stack --stack-name "${STACK_NAME}" --region "${REGION}"
+  aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}" --region "${REGION}"
+fi
+
 sam deploy \
   --stack-name "${STACK_NAME}" \
   --region "${REGION}" \

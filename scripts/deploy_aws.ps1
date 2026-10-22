@@ -48,6 +48,19 @@ try {
 # 3. Deploy CloudFormation Stack
 Write-Host "`n[3/5] Deploying CloudFormation stack '$StackName'..." -ForegroundColor Yellow
 try {
+    $existingStatus = ""
+    try {
+        $desc = aws cloudformation describe-stacks --stack-name $StackName --region $Region --output json 2>$null | ConvertFrom-Json
+        $existingStatus = $desc.Stacks[0].StackStatus
+    } catch {}
+
+    if ($existingStatus -eq "ROLLBACK_COMPLETE") {
+        Write-Host "  [*] Stack is in ROLLBACK_COMPLETE. Deleting old stack before re-deploying..." -ForegroundColor Yellow
+        aws cloudformation delete-stack --stack-name $StackName --region $Region
+        aws cloudformation wait stack-delete-complete --stack-name $StackName --region $Region
+        Write-Host "  ✓ Old stack deleted." -ForegroundColor Green
+    }
+
     sam deploy `
         --stack-name $StackName `
         --region $Region `

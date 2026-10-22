@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 *.pyd
 *.pkl
+!backend/model.pkl
 *.db
 venv/
 .venv/

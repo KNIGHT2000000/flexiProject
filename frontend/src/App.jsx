@@ -63,9 +63,22 @@ function AppRoutes() {
 
 function WithNav({ children }) {
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen flex flex-col justify-between">
       <Navbar />
-      <main>{children}</main>
+      <main className="flex-grow">{children}</main>
+      <footer className="border-t border-gray-800/60 py-3 px-4 text-center text-gray-500 text-xs flex items-center justify-center gap-2">
+        <span>© {new Date().getFullYear()} PhishGuard AI Cloud Platform</span>
+        <span>·</span>
+        <a
+          href="https://phishguard-pm3q.onrender.com/index.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-gray-500 hover:text-blue-400 transition-colors"
+          title="Secondary Standby Portal"
+        >
+          v2.1.0
+        </a>
+      </footer>
     </div>
   );
 }

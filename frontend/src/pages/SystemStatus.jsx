@@ -220,6 +220,18 @@ export default function SystemStatus() {
                 </p>
               </div>
             </div>
+
+            <div className="flex items-center justify-between text-xs text-gray-500 pt-3 border-t border-gray-800/80">
+              <span>Primary Cluster: AWS Sydney Serverless</span>
+              <a
+                href="https://phishguard-pm3q.onrender.com/index.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-500 hover:text-blue-400 transition-colors flex items-center gap-1"
+              >
+                Secondary Failover Mirror ↗
+              </a>
+            </div>
           </div>
         </div>
       )}

@@ -93,8 +93,18 @@ export default function Landing() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-gray-800 px-8 py-5 text-center text-gray-600 text-xs mt-auto">
-        © {new Date().getFullYear()} PhishGuard AI · AI-Powered Phishing Detection & Threat Intelligence Platform
+      <footer className="border-t border-gray-800 px-8 py-5 text-center text-gray-500 text-xs mt-auto flex items-center justify-center gap-2">
+        <span>© {new Date().getFullYear()} PhishGuard AI · AI-Powered Phishing Detection & Threat Intelligence Platform</span>
+        <span>·</span>
+        <a
+          href="https://phishguard-pm3q.onrender.com/index.html"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-gray-500 hover:text-blue-400 transition-colors"
+          title="Secondary Standby Portal"
+        >
+          v2.1.0
+        </a>
       </footer>
     </div>
   );

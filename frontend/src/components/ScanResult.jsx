@@ -235,6 +235,11 @@ ${redirect_chain?.length > 1 ? `\n## Redirect Trace\n${redirect_chain.map((hop, 
         <IntelCard title="VirusTotal" icon={<Globe className="w-4 h-4 text-blue-400" />}>
           {virustotal?.error ? (
             <p className="text-gray-500 text-xs">{virustotal.error}</p>
+          ) : virustotal?.status === "queued" ? (
+            <div className="space-y-1 text-xs text-yellow-400 py-1">
+              <p className="font-semibold">⚡ Analysis Enqueued</p>
+              <p className="text-gray-400">URL newly submitted to 70+ AV vendors. Re-scan in 10s for full breakdown.</p>
+            </div>
           ) : virustotal ? (
             <div className="space-y-1 text-sm">
               <StatRow label="Malicious" value={virustotal.malicious} color="text-red-400" />

@@ -228,34 +228,70 @@ async def check_virustotal(url: str) -> Optional[dict]:
         return {"error": "VirusTotal API key not configured", "available": False}
 
     headers = {"x-apikey": settings.virustotal_api_key}
-    async with httpx.AsyncClient(timeout=15) as client:
+    import base64
+    url_id = base64.urlsafe_b64encode(url.strip().encode()).decode().strip("=")
+
+    async with httpx.AsyncClient(timeout=8.0) as client:
         try:
-            resp = await client.post(
-                "https://www.virustotal.com/api/v3/urls",
-                headers=headers,
-                data={"url": url},
-            )
-            if resp.status_code not in (200, 201):
-                return {"error": f"VT submission failed: {resp.status_code}", "available": True}
-
-            analysis_id = resp.json().get("data", {}).get("id", "")
-            if not analysis_id:
-                return {"error": "No analysis ID returned", "available": True}
-
-            result_resp = await client.get(
-                f"https://www.virustotal.com/api/v3/analyses/{analysis_id}",
+            # 1. Primary Lookup: Query existing analysis report for this URL
+            resp = await client.get(
+                f"https://www.virustotal.com/api/v3/urls/{url_id}",
                 headers=headers,
             )
-            data = result_resp.json().get("data", {}).get("attributes", {})
-            stats = data.get("stats", {})
-            return {
-                "available": True,
-                "malicious": stats.get("malicious", 0),
-                "suspicious": stats.get("suspicious", 0),
-                "harmless": stats.get("harmless", 0),
-                "undetected": stats.get("undetected", 0),
-                "status": data.get("status", "unknown"),
-            }
+            if resp.status_code == 200:
+                data = resp.json().get("data", {}).get("attributes", {})
+                stats = data.get("last_analysis_stats", {})
+                return {
+                    "available": True,
+                    "malicious": stats.get("malicious", 0),
+                    "suspicious": stats.get("suspicious", 0),
+                    "harmless": stats.get("harmless", 0),
+                    "undetected": stats.get("undetected", 0),
+                    "status": "completed",
+                    "reputation": data.get("reputation", 0),
+                }
+
+            # 2. If URL is not in VirusTotal database (404), submit it for scanning
+            if resp.status_code == 404:
+                post_resp = await client.post(
+                    "https://www.virustotal.com/api/v3/urls",
+                    headers=headers,
+                    data={"url": url.strip()},
+                )
+                if post_resp.status_code in (200, 201):
+                    import asyncio
+                    await asyncio.sleep(1.0)
+                    poll_resp = await client.get(
+                        f"https://www.virustotal.com/api/v3/urls/{url_id}",
+                        headers=headers,
+                    )
+                    if poll_resp.status_code == 200:
+                        data = poll_resp.json().get("data", {}).get("attributes", {})
+                        stats = data.get("last_analysis_stats", {})
+                        return {
+                            "available": True,
+                            "malicious": stats.get("malicious", 0),
+                            "suspicious": stats.get("suspicious", 0),
+                            "harmless": stats.get("harmless", 0),
+                            "undetected": stats.get("undetected", 0),
+                            "status": "completed",
+                        }
+                    return {
+                        "available": True,
+                        "malicious": 0,
+                        "suspicious": 0,
+                        "harmless": 0,
+                        "undetected": 0,
+                        "status": "queued",
+                    }
+                return {"error": f"VT submission failed: {post_resp.status_code}", "available": True}
+
+            if resp.status_code == 401:
+                return {"error": "Invalid VirusTotal API key", "available": False}
+            if resp.status_code == 429:
+                return {"error": "VirusTotal API rate limit exceeded (4 req/min)", "available": False}
+
+            return {"error": f"VT lookup returned {resp.status_code}", "available": True}
         except Exception as e:
             return {"error": str(e), "available": True}
 

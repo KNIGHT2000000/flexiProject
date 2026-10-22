@@ -21,7 +21,7 @@ const LABELS = {
 
 export default function ScanResult({ result }) {
   const [copied, setCopied] = useState(false);
-  const { prediction, risk_score, url, features, virustotal, whois, ssl,
+  const { prediction, risk_score, url, features, virustotal, google_safe_browsing, whois, ssl,
           redirect_chain, typosquatting, screenshot, recommendations } = result;
   const label = LABELS[prediction] || LABELS.suspicious;
 
@@ -184,27 +184,54 @@ ${redirect_chain?.length > 1 ? `\n## Redirect Trace\n${redirect_chain.map((hop, 
         </div>
       )}
 
-      {/* Feature Grid */}
-      <div className="card">
-        <h3 className="text-sm font-semibold text-gray-400 mb-3">URL Feature Analysis</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <FeatureBadge label="HTTPS" value={features.uses_https === 1} type="bool" />
-          <FeatureBadge label="IP Address" value={features.has_ip_address === 1} type="bool-bad" />
-          <FeatureBadge label="@ Symbol" value={features.has_at_symbol === 1} type="bool-bad" />
-          <FeatureBadge label="Suspicious TLD" value={features.has_suspicious_tld === 1} type="bool-bad" />
-          <FeatureBadge label="Hyphen in Domain" value={features.has_hyphen_in_domain === 1} type="bool-warn" />
-          <FeatureBadge label="Hex Encoding" value={features.has_hex_encoding === 1} type="bool-bad" />
-          <FeatureStat label="URL Length" value={features.url_length} unit="chars" />
-          <FeatureStat label="Subdomains" value={features.num_subdomains} />
-          <FeatureStat label="Suspicious Keywords" value={features.has_suspicious_keywords} />
-          <FeatureStat label="Dots" value={features.num_dots} />
-          <FeatureStat label="URL Depth" value={features.url_depth} />
-          <FeatureStat label="Digits in URL" value={features.num_digits_in_url} />
+      {/* MalQR / Exploit Attack Banner */}
+      {features?.is_exploit_payload === 1 && (
+        <div className="card border-l-4 border-red-500 bg-red-950/40 p-4">
+          <div className="flex items-start gap-3">
+            <ShieldX className="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5" />
+            <div className="w-full">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-red-400 tracking-wide uppercase">
+                  🚨 Malicious Exploit Payload Detected (MalQR Test Vector)
+                </h3>
+                <span className="badge-phishing text-[10px] uppercase font-bold tracking-wider">
+                  {features.exploit_type?.toUpperCase() || "EXPLOIT"}
+                </span>
+              </div>
+              <p className="text-xs text-gray-300 mt-1">
+                This barcode/QR code does not contain a standard URL. It contains an active injection exploit targeting scanning devices, database engines, or command shells:
+              </p>
+              <div className="bg-black/70 border border-red-900/60 rounded px-3 py-2 mt-2 font-mono text-xs text-red-300 break-all select-all">
+                {url}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* Feature Grid (Only for URLs) */}
+      {features?.is_exploit_payload !== 1 && (
+        <div className="card">
+          <h3 className="text-sm font-semibold text-gray-400 mb-3">URL Feature Analysis</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <FeatureBadge label="HTTPS" value={features.uses_https === 1} type="bool" />
+            <FeatureBadge label="IP Address" value={features.has_ip_address === 1} type="bool-bad" />
+            <FeatureBadge label="@ Symbol" value={features.has_at_symbol === 1} type="bool-bad" />
+            <FeatureBadge label="Suspicious TLD" value={features.has_suspicious_tld === 1} type="bool-bad" />
+            <FeatureBadge label="Hyphen in Domain" value={features.has_hyphen_in_domain === 1} type="bool-warn" />
+            <FeatureBadge label="Hex Encoding" value={features.has_hex_encoding === 1} type="bool-bad" />
+            <FeatureStat label="URL Length" value={features.url_length} unit="chars" />
+            <FeatureStat label="Subdomains" value={features.num_subdomains} />
+            <FeatureStat label="Suspicious Keywords" value={features.has_suspicious_keywords} />
+            <FeatureStat label="Dots" value={features.num_dots} />
+            <FeatureStat label="URL Depth" value={features.url_depth} />
+            <FeatureStat label="Digits in URL" value={features.num_digits_in_url} />
+          </div>
+        </div>
+      )}
 
       {/* Intel Row */}
-      <div className="grid sm:grid-cols-3 gap-4">
+      <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <IntelCard title="VirusTotal" icon={<Globe className="w-4 h-4 text-blue-400" />}>
           {virustotal?.error ? (
             <p className="text-gray-500 text-xs">{virustotal.error}</p>
@@ -212,8 +239,27 @@ ${redirect_chain?.length > 1 ? `\n## Redirect Trace\n${redirect_chain.map((hop, 
             <div className="space-y-1 text-sm">
               <StatRow label="Malicious" value={virustotal.malicious} color="text-red-400" />
               <StatRow label="Suspicious" value={virustotal.suspicious} color="text-yellow-400" />
-              <StatRow label="Harmless" value={virustotal.harmless} color="text-green-400" />
-              <StatRow label="Undetected" value={virustotal.undetected} color="text-gray-400" />
+              <StatRow label="Harmless" value={virustotal.harmless ?? 0} color="text-green-400" />
+              <StatRow label="Undetected" value={virustotal.undetected ?? 0} color="text-gray-400" />
+            </div>
+          ) : <p className="text-gray-500 text-xs">No data</p>}
+        </IntelCard>
+
+        <IntelCard title="Google Threat Intel" icon={<Shield className="w-4 h-4 text-emerald-400" />}>
+          {google_safe_browsing?.error ? (
+            <p className="text-gray-500 text-xs">{google_safe_browsing.error}</p>
+          ) : google_safe_browsing ? (
+            <div className="space-y-1 text-sm">
+              <StatRow
+                label="Status"
+                value={google_safe_browsing.is_threat ? "MALICIOUS" : "Clean"}
+                color={google_safe_browsing.is_threat ? "text-red-400 font-bold" : "text-green-400 font-semibold"}
+              />
+              <StatRow
+                label="Verdict"
+                value={google_safe_browsing.is_threat ? (google_safe_browsing.threat_types?.join(", ") || "Threat") : "Safe"}
+                color={google_safe_browsing.is_threat ? "text-red-300 text-xs" : "text-gray-400 text-xs"}
+              />
             </div>
           ) : <p className="text-gray-500 text-xs">No data</p>}
         </IntelCard>

@@ -24,6 +24,20 @@ export default function Login() {
     }
   };
 
+  const fillAndLogin = async (username, password) => {
+    setForm({ username, password });
+    setLoading(true);
+    setError("");
+    try {
+      await login(username, password);
+      navigate("/dashboard");
+    } catch {
+      setError("Demo login failed. Server container may be cold-starting.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-[80vh] flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
@@ -45,6 +59,29 @@ export default function Login() {
           <button type="submit" className="btn-primary w-full flex items-center justify-center gap-2" disabled={loading}>
             {loading && <Loader2 className="w-4 h-4 animate-spin" />} Sign In
           </button>
+
+          <div className="pt-3 border-t border-gray-800">
+            <p className="text-[11px] text-gray-400 mb-2 text-center uppercase tracking-wider font-semibold">⚡ Instant Demo Access</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => fillAndLogin("demo", "Demo@12345")}
+                disabled={loading}
+                className="btn-secondary text-xs py-2 flex items-center justify-center gap-1.5 hover:border-blue-500 text-blue-400"
+              >
+                ⚡ Demo User
+              </button>
+              <button
+                type="button"
+                onClick={() => fillAndLogin("admin", "Admin@12345")}
+                disabled={loading}
+                className="btn-secondary text-xs py-2 flex items-center justify-center gap-1.5 hover:border-purple-500 text-purple-400"
+              >
+                🛡️ Admin
+              </button>
+            </div>
+          </div>
+
           <p className="text-center text-gray-500 text-xs">
             No account? <Link to="/register" className="text-blue-400 hover:underline">Sign up</Link>
           </p>

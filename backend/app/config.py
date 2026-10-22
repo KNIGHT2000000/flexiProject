@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     virustotal_api_key: str = ""
+    google_safe_browsing_api_key: str = ""
 
     # SMTP for email alerts (optional)
     smtp_host: str = ""

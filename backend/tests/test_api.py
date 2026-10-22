@@ -57,3 +57,26 @@ def test_threat_feed_public():
     r = client.get("/api/scan/feed")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
+
+def test_scan_malqr_exploit_endpoint():
+    """Verify MalQR QR exploit payloads are flagged as critical phishing/exploits without HTTP 400 error."""
+    r = client.post("/api/scan/url", json={"url": "'or'x'='x"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["prediction"] == "phishing"
+    assert data["risk_score"] == 100.0
+    assert data["features"].get("is_exploit_payload") == 1
+    assert "CRITICAL MALICIOUS EXPLOIT" in data["recommendations"][0]
+
+
+def test_demo_admin_auto_seeding():
+    """Verify default demo and admin credentials exist and can authenticate."""
+    r = client.post("/api/auth/login", data={"username": "demo", "password": "Demo@12345"})
+    assert r.status_code == 200
+    assert "access_token" in r.json()
+
+    r_admin = client.post("/api/auth/login", data={"username": "admin", "password": "Admin@12345"})
+    assert r_admin.status_code == 200
+    assert "access_token" in r_admin.json()
+

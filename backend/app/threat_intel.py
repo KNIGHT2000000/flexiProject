@@ -260,6 +260,83 @@ async def check_virustotal(url: str) -> Optional[dict]:
             return {"error": str(e), "available": True}
 
 
+async def check_google_safe_browsing(url: str) -> Optional[dict]:
+    """Check target URL against Google Safe Browsing / Google Threat Intelligence v4 API."""
+    if not settings.google_safe_browsing_api_key:
+        return {"available": False, "error": "Google Safe Browsing API key not configured"}
+
+    endpoint = f"https://safebrowsing.googleapis.com/v4/threatMatches:find?key={settings.google_safe_browsing_api_key}"
+    payload = {
+        "client": {"clientId": "phishguard", "clientVersion": "2.1.0"},
+        "threatInfo": {
+            "threatTypes": ["MALWARE", "SOCIAL_ENGINEERING", "UNWANTED_SOFTWARE", "POTENTIALLY_HARMFUL_APPLICATION"],
+            "platformTypes": ["ANY_PLATFORM"],
+            "threatEntryTypes": ["URL"],
+            "threatEntries": [{"url": url}],
+        },
+    }
+    async with httpx.AsyncClient(timeout=4.0) as client:
+        try:
+            resp = await client.post(endpoint, json=payload)
+            if resp.status_code == 200:
+                data = resp.json()
+                matches = data.get("matches", [])
+                if matches:
+                    threat_types = list(set(m.get("threatType", "MALICIOUS") for m in matches))
+                    return {
+                        "available": True,
+                        "is_threat": True,
+                        "threat_types": threat_types,
+                        "details": f"Flagged by Google Threat Intelligence: {', '.join(threat_types)}",
+                    }
+                return {"available": True, "is_threat": False, "details": "Clean in Google Safe Browsing"}
+            return {"available": False, "error": f"Google Safe Browsing HTTP {resp.status_code}"}
+        except Exception as e:
+            return {"available": False, "error": str(e)}
+
+
+def check_rdap(domain: str) -> Optional[dict]:
+    """Fallback domain registration lookup via public IANA/ICANN RDAP (HTTPS port 443, zero API keys required)."""
+    try:
+        import urllib.request
+        import json
+        req = urllib.request.Request(
+            f"https://rdap.org/domain/{domain}",
+            headers={"User-Agent": "PhishGuard-RDAP/2.1", "Accept": "application/rdap+json"}
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            events = {e.get("eventAction"): e.get("eventDate") for e in data.get("events", [])}
+            reg_date = events.get("registration") or events.get("created")
+            exp_date = events.get("expiration")
+            now = datetime.now(timezone.utc)
+            age_days = None
+            if reg_date:
+                try:
+                    dt = datetime.fromisoformat(reg_date.replace("Z", "+00:00"))
+                    age_days = (now - dt).days
+                except Exception:
+                    pass
+            registrar_name = None
+            for ent in data.get("entities", []):
+                if "registrar" in ent.get("roles", []):
+                    vcard = ent.get("vcardArray", [])
+                    if len(vcard) > 1:
+                        for prop in vcard[1]:
+                            if prop[0] == "fn":
+                                registrar_name = prop[3]
+            return {
+                "domain": domain,
+                "registrar": registrar_name or data.get("port43", "Unknown Registrar"),
+                "creation_date": reg_date,
+                "expiry_date": exp_date,
+                "domain_age_days": age_days,
+                "is_new_domain": age_days is not None and age_days < 180,
+            }
+    except Exception:
+        return None
+
+
 def check_whois(url: str) -> dict:
     try:
         parsed = urlparse(url)
@@ -310,6 +387,13 @@ def check_whois(url: str) -> dict:
             "org": getattr(w, "org", None),
         }
     except Exception as e:
+        # Fallback to public HTTPS RDAP if port 43 WHOIS failed or timed out
+        try:
+            rdap_res = check_rdap(domain)
+            if rdap_res:
+                return rdap_res
+        except Exception:
+            pass
         return {"error": str(e), "domain": urlparse(url).netloc}
 
 
@@ -455,3 +539,161 @@ def generate_recommendations(
         recs.append("No immediate threats detected. Always stay vigilant online.")
 
     return recs
+
+
+# ── MalQR Test Vectors Catalog & Exploit Signatures ───────────────────────────
+MALQR_EXACT_PAYLOADS = {
+    # SQLi Vectors from MalQR
+    "'or'x'='x": {"type": "sqli", "name": "SQL Injection (Auth Bypass)", "desc": "MalQR boolean true exploit 'or'x'='x designed to bypass authentication."},
+    "'or'x'='x'-- -": {"type": "sqli", "name": "SQL Injection (Comment Truncation)", "desc": "MalQR SQL injection with SQL comment marker '-- -'."},
+    "'or'x'='x'/*": {"type": "sqli", "name": "SQL Injection (Block Comment)", "desc": "MalQR SQL injection with inline C-style comment '/*' truncation."},
+    "'or'x'='x'//": {"type": "sqli", "name": "SQL Injection (Slash Comment)", "desc": "MalQR SQL injection with slash-based comment delimiter."},
+    "'and'x'='x": {"type": "sqli", "name": "SQL Injection (Boolean AND)", "desc": "MalQR SQL injection testing logic gate 'and' condition."},
+    "'and'x'='x'-- -": {"type": "sqli", "name": "SQL Injection (AND + Comment)", "desc": "MalQR SQL injection testing logical AND with comment truncation."},
+    "'and'x'='x'/*": {"type": "sqli", "name": "SQL Injection (AND + Comment)", "desc": "MalQR SQL injection testing logical AND with inline comment."},
+    "'and'x'='x'//": {"type": "sqli", "name": "SQL Injection (AND + Slash)", "desc": "MalQR SQL injection testing logical AND with slash delimiter."},
+    "or 1=1": {"type": "sqli", "name": "SQL Injection (Tautology 1=1)", "desc": "Classic SQL injection tautology payload 'or 1=1'."},
+    "or 1=1-- -": {"type": "sqli", "name": "SQL Injection (Tautology + Comment)", "desc": "SQL injection tautology with comment truncation."},
+    "or 1=1/*": {"type": "sqli", "name": "SQL Injection (Tautology + Comment)", "desc": "SQL injection tautology with inline comment."},
+    "or 1=1//": {"type": "sqli", "name": "SQL Injection (Tautology + Slash)", "desc": "SQL injection tautology with slash comment."},
+    "and 1=1": {"type": "sqli", "name": "SQL Injection (Boolean True)", "desc": "SQL injection boolean true probe 'and 1=1'."},
+    "and 1=1-- -": {"type": "sqli", "name": "SQL Injection (Boolean True + Comment)", "desc": "SQL injection probe with comment truncation."},
+    "and 1=1/*": {"type": "sqli", "name": "SQL Injection (Boolean True + Comment)", "desc": "SQL injection probe with inline comment."},
+    "and 1=1//": {"type": "sqli", "name": "SQL Injection (Boolean True + Slash)", "desc": "SQL injection probe with slash comment."},
+    "'||'x'='x": {"type": "sqli", "name": "SQL Injection (Concatenation / Logical OR)", "desc": "MalQR SQL injection using Oracle/Postgres '||' concatenation or OR operator."},
+    "'||'x'='x'-- -": {"type": "sqli", "name": "SQL Injection (Concatenation + Comment)", "desc": "MalQR SQL injection with concatenation and comment."},
+    "'||'x'='x'/*": {"type": "sqli", "name": "SQL Injection (Concatenation + Comment)", "desc": "MalQR SQL injection with concatenation and block comment."},
+    "'||'x'='x'//": {"type": "sqli", "name": "SQL Injection (Concatenation + Slash)", "desc": "MalQR SQL injection with concatenation and slash delimiter."},
+    "'&&'x'='x": {"type": "sqli", "name": "SQL Injection (Logical AND Operator)", "desc": "MalQR SQL injection using '&&' operator."},
+    "'&&'x'='x'-- -": {"type": "sqli", "name": "SQL Injection (AND + Comment)", "desc": "MalQR SQL injection using '&&' with comment."},
+    "'&&'x'='x'/*": {"type": "sqli", "name": "SQL Injection (AND + Comment)", "desc": "MalQR SQL injection using '&&' with block comment."},
+    "'&&'x'='x'//": {"type": "sqli", "name": "SQL Injection (AND + Slash)", "desc": "MalQR SQL injection using '&&' with slash delimiter."},
+    "|| 1=1": {"type": "sqli", "name": "SQL Injection (Pipe Tautology)", "desc": "SQL injection pipe tautology '|| 1=1'."},
+    "|| 1=1-- -": {"type": "sqli", "name": "SQL Injection (Pipe Tautology + Comment)", "desc": "SQL injection pipe tautology with comment."},
+    "|| 1=1/*": {"type": "sqli", "name": "SQL Injection (Pipe Tautology + Comment)", "desc": "SQL injection pipe tautology with block comment."},
+    "|| 1=1//": {"type": "sqli", "name": "SQL Injection (Pipe Tautology + Slash)", "desc": "SQL injection pipe tautology with slash delimiter."},
+    "&& 1=1": {"type": "sqli", "name": "SQL Injection (Logical AND Tautology)", "desc": "SQL injection AND operator tautology '&& 1=1'."},
+    "&& 1=1-- -": {"type": "sqli", "name": "SQL Injection (Logical AND + Comment)", "desc": "SQL injection AND operator tautology with comment."},
+    "&& 1=1/*": {"type": "sqli", "name": "SQL Injection (Logical AND + Comment)", "desc": "SQL injection AND operator tautology with block comment."},
+    "&& 1=1//": {"type": "sqli", "name": "SQL Injection (Logical AND + Slash)", "desc": "SQL injection AND operator tautology with slash delimiter."},
+
+    # Command Injection Vectors from MalQR
+    "&& echo 'owned' &&": {"type": "ci", "name": "Command Injection (AND Chaining)", "desc": "MalQR OS command injection using '&&' chaining to execute shell payload."},
+    "; echo 'owned';": {"type": "ci", "name": "Command Injection (Semicolon Delimiter)", "desc": "MalQR OS command injection using ';' delimiter to execute shell command."},
+    "$(echo 'owned')": {"type": "ci", "name": "Command Injection (Subshell Substitution)", "desc": "MalQR OS command injection using '$()' command substitution syntax."},
+    "`echo 'owned'`": {"type": "ci", "name": "Command Injection (Backtick Execution)", "desc": "MalQR OS command injection using backtick shell evaluation."},
+    "| echo 'owned'": {"type": "ci", "name": "Command Injection (Pipe Execution)", "desc": "MalQR OS command injection using Unix pipe '|' to execute shell command."},
+
+    # XSS Vectors from MalQR
+    "<script>alert(1)</script>": {"type": "xss", "name": "Cross-Site Scripting (Script Tag)", "desc": "MalQR stored/reflected XSS payload executing alert(1)."},
+    "\"><script>alert(1)</script>": {"type": "xss", "name": "Cross-Site Scripting (Attribute Escape)", "desc": "MalQR XSS escaping HTML attributes with quotes and injecting script tag."},
+    "<img/src=c/onerror=alert(1)>": {"type": "xss", "name": "Cross-Site Scripting (Image OnError)", "desc": "MalQR XSS using broken image onerror event handler."},
+    "<svg/onload=alert(1)>": {"type": "xss", "name": "Cross-Site Scripting (SVG OnLoad)", "desc": "MalQR XSS using SVG inline onload execution."},
+
+    # Fuzzing / Buffer Overflow Vectors from MalQR
+    "\"'`\\": {"type": "fuzz", "name": "Parser Fuzzing (Metacharacters)", "desc": "MalQR scanner fuzzing payload containing quotes, backticks, and escape backslashes."},
+    "A*32": {"type": "fuzz", "name": "Buffer Overflow Probe (32 bytes)", "desc": "MalQR buffer overflow / memory corruption test vector."},
+    "A*64": {"type": "fuzz", "name": "Buffer Overflow Probe (64 bytes)", "desc": "MalQR buffer overflow / memory corruption test vector."},
+    "A*128": {"type": "fuzz", "name": "Buffer Overflow Probe (128 bytes)", "desc": "MalQR buffer overflow / memory corruption test vector."},
+    "A*256": {"type": "fuzz", "name": "Buffer Overflow Probe (256 bytes)", "desc": "MalQR buffer overflow / memory corruption test vector."},
+    "A*512": {"type": "fuzz", "name": "Buffer Overflow Probe (512 bytes)", "desc": "MalQR buffer overflow / memory corruption test vector."},
+    "A*1024": {"type": "fuzz", "name": "Buffer Overflow Probe (1024 bytes)", "desc": "MalQR buffer overflow / memory corruption test vector."},
+    "A*2048": {"type": "fuzz", "name": "Buffer Overflow Probe (2048 bytes)", "desc": "MalQR buffer overflow / memory corruption test vector."},
+    "A*2953": {"type": "fuzz", "name": "Buffer Overflow Probe (2953 bytes Max)", "desc": "MalQR maximum QR code payload capacity buffer overflow probe."},
+}
+
+
+def detect_malqr_and_exploit_payload(text: str) -> Optional[dict]:
+    """Inspect decoded QR/barcode content for MalQR exploits (SQLi, CI, XSS, Buffer Overflow)."""
+    if not text:
+        return None
+    raw = text.strip()
+
+    # 1. Exact catalog match from MalQR
+    if raw in MALQR_EXACT_PAYLOADS:
+        info = MALQR_EXACT_PAYLOADS[raw]
+        return {
+            "is_exploit": True,
+            "type": info["type"],
+            "name": info["name"],
+            "description": info["desc"],
+            "mitigation": "Enforce strict input parameterization (Prepared Statements / ORM) and context encoding. Never pass unvalidated QR contents to shell or database.",
+        }
+
+    raw_lower = raw.lower()
+
+    # 2. SQL Injection Signatures
+    sqli_patterns = [
+        r"('|\")\s*(or|and)\s*('|\")?\w+('|\")?\s*=",
+        r"union\s+select",
+        r"\bselect\b.*\bfrom\b",
+        r"\binsert\s+into\b",
+        r"\bdrop\s+table\b",
+        r"\bexec(\s*|\()",
+        r"\bwaitfor\s+delay\b",
+        r"'\s*or\s*1\s*=\s*1",
+        r"\"\s*or\s*1\s*=\s*1",
+        r"--\s*-\s*$",
+        r"/\*.*\*/",
+    ]
+    for pat in sqli_patterns:
+        if re.search(pat, raw_lower):
+            return {
+                "is_exploit": True,
+                "type": "sqli",
+                "name": "SQL Injection Exploit Pattern",
+                "description": f"Payload matches SQL injection attack signature targeting database parser: '{raw[:80]}'.",
+                "mitigation": "Use parameterized queries or ORM models. Do not concatenate scanner input into SQL strings.",
+            }
+
+    # 3. OS Command Injection Signatures
+    ci_patterns = [
+        r"(;|&&|\|)\s*(cat|ls|rm|echo|whoami|id|nc|bash|sh|curl|wget|ping)\b",
+        r"\$\(.*\)",
+        r"`.*`",
+        r"/etc/passwd",
+        r"/bin/sh",
+    ]
+    for pat in ci_patterns:
+        if re.search(pat, raw):
+            return {
+                "is_exploit": True,
+                "type": "ci",
+                "name": "OS Command Injection Exploit Pattern",
+                "description": f"Payload contains shell command delimiters/execution syntax: '{raw[:80]}'.",
+                "mitigation": "Never invoke shell execution functions (e.g. exec, system, subprocess with shell=True) on barcode input.",
+            }
+
+    # 4. Cross-Site Scripting (XSS) Signatures
+    xss_patterns = [
+        r"<script.*?>",
+        r"javascript:\s*",
+        r"onerror\s*=",
+        r"onload\s*=",
+        r"onclick\s*=",
+        r"alert\s*\(",
+        r"<svg.*?/onload",
+        r"<img.*?/onerror",
+        r"<iframe.*?>",
+    ]
+    for pat in xss_patterns:
+        if re.search(pat, raw_lower):
+            return {
+                "is_exploit": True,
+                "type": "xss",
+                "name": "Cross-Site Scripting (XSS) Exploit Pattern",
+                "description": f"Payload contains executable script tags or inline DOM event handlers: '{raw[:80]}'.",
+                "mitigation": "Sanitize and HTML-encode all decoded content before rendering in the DOM.",
+            }
+
+    # 5. Buffer Overflow / Repetition Fuzzing
+    if len(raw) >= 32 and (raw.count("A") / len(raw) > 0.8 or raw.count("%s") > 4 or "\x00" in raw):
+        return {
+            "is_exploit": True,
+            "type": "fuzz",
+            "name": "Buffer Overflow / Format String Exploit",
+            "description": f"Payload contains repeating memory corruption or format string fuzzing tokens (length {len(raw)}).",
+            "mitigation": "Enforce strict length bounds and UTF-8 validation on scanned barcode data buffers.",
+        }
+
+    return None

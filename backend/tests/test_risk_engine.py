@@ -120,3 +120,31 @@ def test_email_inspector_social_engineering():
     assert result.sender.is_spoofed is True
     assert len(result.mismatched_links) >= 1
 
+
+def test_malqr_exploit_detection():
+    from app.threat_intel import detect_malqr_and_exploit_payload
+    # 1. SQL Injection from MalQR
+    sqli = detect_malqr_and_exploit_payload("'or'x'='x")
+    assert sqli is not None
+    assert sqli["type"] == "sqli"
+
+    # 2. Command Injection from MalQR
+    ci = detect_malqr_and_exploit_payload("; echo 'owned';")
+    assert ci is not None
+    assert ci["type"] == "ci"
+
+    # 3. XSS from MalQR
+    xss = detect_malqr_and_exploit_payload("<script>alert(1)</script>")
+    assert xss is not None
+    assert xss["type"] == "xss"
+
+    # 4. Fuzzing from MalQR
+    fuzz = detect_malqr_and_exploit_payload("A*2048")
+    assert fuzz is not None
+    assert fuzz["type"] == "fuzz"
+
+    # 5. Clean URL should return None
+    clean = detect_malqr_and_exploit_payload("https://google.com")
+    assert clean is None
+
+

@@ -158,6 +158,7 @@ def aggregate_risk(
     vector: list = None,
     validation_result=None,
     virustotal_data: Optional[dict] = None,
+    google_safe_browsing_data: Optional[dict] = None,
     whois_data: Optional[dict] = None,
     ssl_data: Optional[dict] = None,
     redirect_chain: Optional[list[str]] = None,
@@ -361,6 +362,33 @@ def aggregate_risk(
                 source="threat_intel.virustotal",
                 status=EvidenceStatus.PROVIDER_ERROR,
                 description=f"VirusTotal unavailable: {virustotal_data.get('error')}",
+            ))
+
+    # 5b. Threat Intelligence: Google Safe Browsing
+    if google_safe_browsing_data:
+        if google_safe_browsing_data.get("available"):
+            if google_safe_browsing_data.get("is_threat"):
+                types_str = ", ".join(google_safe_browsing_data.get("threat_types", ["MALICIOUS"]))
+                final_score = 100.0
+                evidence.append(EvidenceItem(
+                    source="threat_intel.google_safe_browsing",
+                    status=EvidenceStatus.CONFIRMED_THREAT,
+                    description=f"Google Threat Intelligence flagged this URL as {types_str}",
+                    weight=100.0,
+                    details=google_safe_browsing_data,
+                ))
+            else:
+                evidence.append(EvidenceItem(
+                    source="threat_intel.google_safe_browsing",
+                    status=EvidenceStatus.NO_THREAT_MATCH,
+                    description="No threats reported by Google Safe Browsing",
+                    details=google_safe_browsing_data,
+                ))
+        elif "error" in google_safe_browsing_data:
+            evidence.append(EvidenceItem(
+                source="threat_intel.google_safe_browsing",
+                status=EvidenceStatus.PROVIDER_ERROR,
+                description=f"Google Safe Browsing unavailable: {google_safe_browsing_data.get('error')}",
             ))
 
     # 6. Domain Age (WHOIS / RDAP)

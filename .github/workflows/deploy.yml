@@ -123,7 +123,11 @@ jobs:
             --stack-name "${STACK_NAME}" \
             --region "${{ env.AWS_REGION }}" \
             --capabilities CAPABILITY_IAM \
-            --parameter-overrides Environment="${{ env.ENVIRONMENT }}" LogRetentionInDays=14 \
+            --parameter-overrides \
+              Environment="${{ env.ENVIRONMENT }}" \
+              LogRetentionInDays=14 \
+              VirusTotalApiKey="${{ secrets.VIRUSTOTAL_API_KEY }}" \
+              GoogleSafeBrowsingApiKey="${{ secrets.GOOGLE_SAFE_BROWSING_API_KEY }}" \
             --resolve-s3 \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset

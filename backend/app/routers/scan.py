@@ -12,8 +12,9 @@ from app import models, schemas
 from app.auth import get_current_user
 from app.feature_extractor import extract_features, features_to_vector
 from app.threat_intel import (
-    check_virustotal, check_whois, check_ssl,
+    check_virustotal, check_google_safe_browsing, check_whois, check_ssl,
     check_typosquatting, capture_screenshot, generate_recommendations,
+    detect_malqr_and_exploit_payload,
 )
 from app.url_utils import validate_and_normalize_url, redact_sensitive_url
 from app.ssrf_protection import safe_trace_redirects, is_safe_host
@@ -87,7 +88,47 @@ def _is_whitelisted(url: str, db: Session, user_id: int) -> bool:
 
 
 async def _run_scan(url: str, db: Session, user_id=None, with_screenshot: bool = False) -> schemas.ScanResult:
-    """Core scan logic shared by single-scan and bulk-scan endpoints."""
+    """Core scan logic shared by single-scan, QR-scan, and bulk-scan endpoints."""
+    # 0. MalQR & Exploit Payload Inspection (SQLi, CI, XSS, Buffer Overflow)
+    exploit = detect_malqr_and_exploit_payload(url)
+    if exploit:
+        recs = [
+            f"🚨 CRITICAL MALICIOUS EXPLOIT DETECTED: {exploit['name']}",
+            f"Threat Vector: {exploit['type'].upper()} ({exploit['description']})",
+            "This QR code contains an attack payload intended to exploit scanning software, database parsers, or command shells.",
+            exploit["mitigation"],
+        ]
+        exploit_features = {
+            "is_exploit_payload": 1,
+            "exploit_type": exploit["type"],
+            "raw_payload_length": len(url),
+        }
+        scan = models.ScanHistory(
+            url=url[:500],
+            prediction="phishing",
+            risk_score=100.0,
+            features=json.dumps(exploit_features),
+            virustotal_result=json.dumps({"exploit_detected": True, "type": exploit["type"]}),
+            whois_result=json.dumps({"registrar": "N/A (Exploit Payload)", "domain_age_days": None}),
+            ssl_result=json.dumps({"has_ssl": False}),
+            redirect_chain=json.dumps([]),
+            typosquatting=json.dumps([]),
+            user_id=user_id,
+        )
+        db.add(scan)
+        db.commit()
+        return schemas.ScanResult(
+            url=url,
+            prediction="phishing",
+            risk_score=100.0,
+            features=exploit_features,
+            virustotal={"available": True, "malicious": 1, "details": f"Exploit: {exploit['name']}"},
+            google_safe_browsing={"available": True, "is_threat": True, "details": "Exploit signature triggered"},
+            whois={"registrar": "N/A (Exploit Payload)", "domain_age_days": None},
+            ssl={"has_ssl": False, "error": "Non-HTTP Exploit Payload"},
+            recommendations=recs,
+        )
+
     # 1. Strict URL validation & RFC normalization
     val = validate_and_normalize_url(url)
     if not val.is_valid:
@@ -122,6 +163,7 @@ async def _run_scan(url: str, db: Session, user_id=None, with_screenshot: bool =
 
     # 5. External threat intelligence with safe SSRF protections & timeouts
     vt_result = await check_virustotal(target_url)
+    gsb_result = await check_google_safe_browsing(target_url)
     whois_result = check_whois(target_url)
     ssl_result = check_ssl(target_url)
     redirect_chain = await safe_trace_redirects(target_url, max_hops=3, timeout_sec=2.0)
@@ -140,6 +182,7 @@ async def _run_scan(url: str, db: Session, user_id=None, with_screenshot: bool =
         vector=vector,
         validation_result=val,
         virustotal_data=vt_result,
+        google_safe_browsing_data=gsb_result,
         whois_data=whois_result,
         ssl_data=ssl_result,
         redirect_chain=redirect_chain,
@@ -175,7 +218,9 @@ async def _run_scan(url: str, db: Session, user_id=None, with_screenshot: bool =
 
     return schemas.ScanResult(
         url=target_url, prediction=prediction, risk_score=risk_score,
-        features=features, virustotal=vt_result, whois=whois_result,
+        features=features, virustotal=vt_result,
+        google_safe_browsing=gsb_result,
+        whois=whois_result,
         ssl=ssl_result, redirect_chain=redirect_chain,
         typosquatting=typosquatting, screenshot=screenshot,
         recommendations=recommendations,

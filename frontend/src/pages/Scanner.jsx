@@ -114,7 +114,13 @@ export default function Scanner() {
             const maxDim = 1200;
             let width = img.width;
             let height = img.height;
-            if (width > maxDim || height > maxDim) {
+
+            // Upscale small icons/images (e.g. 150x150 MalQR test samples) to make modules readable
+            if (width < 320 && height < 320) {
+              const scale = Math.max(2, Math.round(360 / Math.max(width, height)));
+              width = width * scale;
+              height = height * scale;
+            } else if (width > maxDim || height > maxDim) {
               const ratio = Math.min(maxDim / width, maxDim / height);
               width = Math.round(width * ratio);
               height = Math.round(height * ratio);
@@ -124,6 +130,7 @@ export default function Scanner() {
             const ctx = canvas.getContext("2d", { willReadFrequently: true });
             canvas.width = width;
             canvas.height = height;
+            ctx.imageSmoothingEnabled = false; // Preserve crisp QR block edges
             ctx.drawImage(img, 0, 0, width, height);
 
             const imgData = ctx.getImageData(0, 0, width, height);
@@ -138,7 +145,20 @@ export default function Scanner() {
               });
             }
 
-            // If downscaled and still not found, try full resolution
+            // High contrast binarization pass for computer screen glare or faint codes
+            if (!code) {
+              const d = new Uint8ClampedArray(imgData.data);
+              for (let i = 0; i < d.length; i += 4) {
+                const lum = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+                const bin = lum > 128 ? 255 : 0;
+                d[i] = bin;
+                d[i + 1] = bin;
+                d[i + 2] = bin;
+              }
+              code = jsQR(d, width, height, { inversionAttempts: "attemptBoth" });
+            }
+
+            // If downscaled/upscaled and still not found, try original raw resolution
             if (!code && (img.width !== width || img.height !== height)) {
               canvas.width = img.width;
               canvas.height = img.height;
@@ -234,7 +254,7 @@ export default function Scanner() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const code = jsQR(imgData.data, imgData.width, imgData.height, {
-        inversionAttempts: "dontInvert",
+        inversionAttempts: "attemptBoth",
       });
 
       if (code && code.data) {

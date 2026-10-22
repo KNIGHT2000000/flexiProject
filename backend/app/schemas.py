@@ -50,6 +50,7 @@ class ScanResult(BaseModel):
     risk_score: float
     features: dict
     virustotal: Optional[dict] = None
+    google_safe_browsing: Optional[dict] = None
     whois: Optional[dict] = None
     ssl: Optional[dict] = None
     redirect_chain: Optional[list[str]] = None

@@ -17,6 +17,42 @@ from app.routers import auth, scan, apikeys, whitelist, alerts, admin, users, an
 # Ensure database tables exist
 Base.metadata.create_all(bind=engine)
 
+
+def _seed_default_users():
+    """Auto-seed persistent demo and admin credentials so Lambda cold starts never lose demo accounts."""
+    try:
+        from app.database import SessionLocal
+        from app.models import User
+        from app.auth import hash_password
+        db = SessionLocal()
+        try:
+            if not db.query(User).filter(User.username == "admin").first():
+                admin_user = User(
+                    username="admin",
+                    email="admin@phishguard.io",
+                    hashed_password=hash_password("Admin@12345"),
+                    role="admin",
+                    is_active=True,
+                )
+                db.add(admin_user)
+            if not db.query(User).filter(User.username == "demo").first():
+                demo_user = User(
+                    username="demo",
+                    email="demo@phishguard.io",
+                    hashed_password=hash_password("Demo@12345"),
+                    role="user",
+                    is_active=True,
+                )
+                db.add(demo_user)
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
+_seed_default_users()
+
 # Structured logger setup
 logger = logging.getLogger("phishguard.api")
 logging.basicConfig(level=logging.INFO, format="%(message)s")

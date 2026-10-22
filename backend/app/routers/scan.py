@@ -1,7 +1,6 @@
 import json
 import io
 import csv
-import joblib
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
@@ -19,9 +18,14 @@ from app.threat_intel import (
 from app.url_utils import validate_and_normalize_url, redact_sensitive_url
 from app.ssrf_protection import safe_trace_redirects, is_safe_host
 from app.risk_engine import aggregate_risk, evaluate_heuristics
+from app.ml_model import FastRandomForest
 
 router = APIRouter(prefix="/api/scan", tags=["scan"])
 
+TREE_MODEL_PATHS = [
+    Path(__file__).parent.parent.parent / "model_trees.json",
+    Path(__file__).parent.parent.parent / "scripts" / "model_trees.json",
+]
 MODEL_PATHS = [
     Path(__file__).parent.parent.parent / "model.pkl",
     Path(__file__).parent.parent.parent / "scripts" / "model.pkl",
@@ -32,11 +36,19 @@ _model = None
 def get_model():
     global _model
     if _model is None:
+        for p in TREE_MODEL_PATHS:
+            if p.exists():
+                try:
+                    _model = FastRandomForest.load(p)
+                    return _model
+                except Exception:
+                    continue
         for p in MODEL_PATHS:
             if p.exists():
                 try:
+                    import joblib
                     _model = joblib.load(p)
-                    break
+                    return _model
                 except Exception:
                     continue
     return _model

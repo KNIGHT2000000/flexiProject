@@ -148,7 +148,29 @@ def train(dataset_path=None):
     scripts_path = Path(__file__).parent / "model.pkl"
     joblib.dump(model, backend_root_path)
     joblib.dump(model, scripts_path)
+
+    # Export lightweight tree representation for zero-scipy Lambda inference
+    import json
+    trees = []
+    for dt in model.estimators_:
+        t = dt.tree_
+        trees.append({
+            'left': t.children_left.tolist(),
+            'right': t.children_right.tolist(),
+            'feat': t.feature.tolist(),
+            'th': [round(x, 6) for x in t.threshold.tolist()],
+            'val': [[[round(c, 4) for c in cl] for cl in v] for v in t.value.tolist()]
+        })
+    tree_data = {'classes': model.classes_.tolist(), 'n_features': model.n_features_in_, 'trees': trees}
+    tree_root_path = Path(__file__).parent.parent / "model_trees.json"
+    tree_scripts_path = Path(__file__).parent / "model_trees.json"
+    with open(tree_root_path, "w", encoding="utf-8") as f:
+        json.dump(tree_data, f)
+    with open(tree_scripts_path, "w", encoding="utf-8") as f:
+        json.dump(tree_data, f)
+
     print(f"\nModel saved to {backend_root_path} and {scripts_path}")
+    print(f"Compact tree model saved to {tree_root_path} and {tree_scripts_path}")
 
 
 if __name__ == "__main__":

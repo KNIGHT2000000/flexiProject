@@ -1,5 +1,10 @@
 # Development, testing, and linting dependencies for PhishGuard Cloud
 -r requirements.txt
+scikit-learn==1.4.2
+pandas==2.2.2
+joblib==1.4.2
+alembic==1.13.1
+pyOpenSSL==24.1.0
 pytest==8.2.2
 playwright==1.44.0
 cfn-lint==1.58.0

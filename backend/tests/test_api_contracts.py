@@ -135,3 +135,45 @@ def test_lambda_mangum_adapter_execution():
     assert "status" in response["body"]
     assert "ok" in response["body"]
     assert response["headers"]["x-request-id"] == "lambda-sim-test-123"
+
+
+def test_lambda_stage_prefix_stripping():
+    """Verify that stage prefixes (e.g. /prod/health) are stripped and route to /health with HTTP 200."""
+    from app.lambda_handler import handler
+
+    mock_event = {
+        "version": "2.0",
+        "routeKey": "ANY /{proxy+}",
+        "rawPath": "/prod/health",
+        "rawQueryString": "",
+        "headers": {
+            "x-request-id": "lambda-stage-test-456",
+        },
+        "requestContext": {
+            "stage": "prod",
+            "http": {
+                "method": "GET",
+                "path": "/prod/health",
+                "protocol": "HTTP/1.1",
+                "sourceIp": "203.0.113.195",
+                "userAgent": "AWS-Test",
+            },
+        },
+        "isBase64Encoded": False,
+    }
+
+    mock_context = type("MockContext", (), {
+        "function_name": "phishguard-api",
+        "function_version": "$LATEST",
+        "invoked_function_arn": "arn:aws:lambda:ap-southeast-2:123456789012:function:phishguard-api",
+        "memory_limit_in_mb": "512",
+        "aws_request_id": "test-aws-req-id-888",
+        "log_group_name": "/aws/lambda/phishguard-api",
+        "log_stream_name": "2026/10/22/[$LATEST]def",
+        "get_remaining_time_in_millis": lambda: 30000,
+    })()
+
+    response = handler(mock_event, mock_context)
+    assert response["statusCode"] == 200
+    assert "ok" in response["body"]
+

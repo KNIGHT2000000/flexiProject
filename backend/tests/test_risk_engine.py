@@ -69,3 +69,54 @@ def test_ml_model_integration():
     assert res.ml_prediction is not None
     assert res.ml_risk_score is not None
     assert res.prediction == "legitimate"
+
+
+def test_dga_and_invalid_tld_detection():
+    """Verify that keyboard-mash DGA strings with fake TLDs are classified as phishing."""
+    from app.url_utils import validate_and_normalize_url
+
+    url = "kskfnsfksnfksnf.com.randwa"
+    val = validate_and_normalize_url(url)
+    features = extract_features(val.normalized_url)
+    model = get_model()
+    vector = features_to_vector(features)
+    res = aggregate_risk(features=features, ml_model=model, vector=vector, validation_result=val)
+
+    assert res.prediction == "phishing"
+    assert res.risk_score >= 80.0
+    assert any("threat_intel.dga_entropy" in e.source or "threat_intel.invalid_tld" in e.source for e in res.evidence)
+
+
+def test_brand_camouflage_shield():
+    """Verify that unauthorized domains embedding trusted brand keywords are classified as phishing."""
+    from app.url_utils import validate_and_normalize_url
+
+    url = "https://paypal-security-update.com/login"
+    val = validate_and_normalize_url(url)
+    features = extract_features(val.normalized_url)
+    model = get_model()
+    vector = features_to_vector(features)
+    res = aggregate_risk(features=features, ml_model=model, vector=vector, validation_result=val)
+
+    assert res.prediction in ("phishing", "suspicious")
+    assert res.risk_score >= 60.0
+    assert any("brand_camouflage" in e.source for e in res.evidence)
+
+
+def test_email_inspector_social_engineering():
+    """Verify that urgency coercion, sender spoofing, and mismatched links are flagged."""
+    from app.email_inspector import inspect_email
+
+    sample = (
+        'From: "PayPal Security" <support@paypa1-update.com>\n'
+        'Subject: URGENT: Your account has been suspended within 24 hours\n\n'
+        'Unauthorized login detected. Please click here to restore access:\n'
+        '<a href="http://evil-trap.xyz/login">https://www.paypal.com</a>\n'
+    )
+    result = inspect_email(sample, [{"url": "http://evil-trap.xyz/login", "prediction": "phishing", "risk_score": 95.0}])
+    assert result.email_prediction == "phishing"
+    assert result.email_risk_score >= 80.0
+    assert len(result.lures_detected) >= 2
+    assert result.sender.is_spoofed is True
+    assert len(result.mismatched_links) >= 1
+

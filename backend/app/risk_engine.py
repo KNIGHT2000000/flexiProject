@@ -208,7 +208,87 @@ def aggregate_risk(
     heuristic_pred, heuristic_score, heuristic_evidence = evaluate_heuristics(features, validation_result)
     evidence.extend(heuristic_evidence)
 
-    # 4. ML Model Inference
+    target_url = (
+        getattr(validation_result, "normalized_url", None)
+        or getattr(validation_result, "raw_url", None)
+        or features.get("url")
+        or ""
+    )
+
+    # 3a. DGA Entropy, Consonant Clustering & Non-ICANN TLD Shield
+    if target_url:
+        from app.threat_intel import detect_dga_and_invalid_tld, detect_brand_camouflage, detect_free_hosting_abuse, detect_url_shortener
+        dga_info = detect_dga_and_invalid_tld(target_url)
+        if dga_info.get("is_dga_gibberish"):
+            evidence.append(EvidenceItem(
+                source="threat_intel.dga_entropy",
+                status=EvidenceStatus.CONFIRMED_THREAT,
+                description=f"Algorithmic DGA / gibberish pattern detected: {dga_info.get('dga_reason')}",
+                weight=50.0,
+                details=dga_info,
+            ))
+            heuristic_score = min(heuristic_score + 50.0, 100.0)
+
+        if dga_info.get("is_invalid_tld"):
+            evidence.append(EvidenceItem(
+                source="threat_intel.invalid_tld",
+                status=EvidenceStatus.SUSPICIOUS_HEURISTIC,
+                description="Domain has an unrecognized, fake, or non-ICANN top-level domain (TLD)",
+                weight=35.0,
+                details=dga_info,
+            ))
+            heuristic_score = min(heuristic_score + 35.0, 100.0)
+
+        if dga_info.get("deceptive_subdomain"):
+            evidence.append(EvidenceItem(
+                source="threat_intel.deceptive_subdomain",
+                status=EvidenceStatus.CONFIRMED_THREAT,
+                description="URL disguises .com/.net as an internal subdomain label to mimic trusted hosts",
+                weight=35.0,
+                details=dga_info,
+            ))
+            heuristic_score = min(heuristic_score + 35.0, 100.0)
+
+        # 3b. Brand Camouflage Shield
+        brand_matches = typosquatting if typosquatting is not None else detect_brand_camouflage(target_url)
+        if not brand_matches:
+            brand_matches = detect_brand_camouflage(target_url)
+        if brand_matches:
+            for b in brand_matches:
+                evidence.append(EvidenceItem(
+                    source="threat_intel.brand_camouflage",
+                    status=EvidenceStatus.CONFIRMED_THREAT,
+                    description=b.get("description", f"Brand Camouflage Shield: spoofing detected for {b.get('brand')}"),
+                    weight=55.0,
+                    details=b,
+                ))
+            heuristic_score = min(heuristic_score + 55.0, 100.0)
+
+        # 3c. Free / Ephemeral Hosting Abuse Guard
+        free_host = detect_free_hosting_abuse(target_url)
+        if free_host:
+            evidence.append(EvidenceItem(
+                source="threat_intel.free_hosting_abuse",
+                status=EvidenceStatus.CONFIRMED_THREAT,
+                description=free_host.get("description", "Free hosting service used with sensitive credential path"),
+                weight=45.0,
+                details=free_host,
+            ))
+            heuristic_score = min(heuristic_score + 45.0, 100.0)
+
+        # 3d. URL Shortener Concealment
+        shortener = detect_url_shortener(target_url)
+        if shortener:
+            evidence.append(EvidenceItem(
+                source="threat_intel.url_shortener",
+                status=EvidenceStatus.SUSPICIOUS_HEURISTIC,
+                description=shortener.get("description", "URL shortener detected concealing destination"),
+                weight=25.0,
+                details=shortener,
+            ))
+            heuristic_score = min(heuristic_score + 25.0, 100.0)
+
+    # 4. ML Model Inference & Calibrated Ensemble
     ml_pred = None
     ml_risk_score = None
     if ml_model and vector is not None:
@@ -228,7 +308,13 @@ def aggregate_risk(
                 weight=ml_risk_score,
                 details={"probabilities": proba.tolist()},
             ))
-            final_score = ml_risk_score
+            
+            # Calibrated Ensemble: When confirmed high-confidence threats trigger, do not suppress with low ML score
+            has_confirmed_threat = any(e.status == EvidenceStatus.CONFIRMED_THREAT for e in evidence)
+            if has_confirmed_threat:
+                final_score = max(ml_risk_score, heuristic_score)
+            else:
+                final_score = max(ml_risk_score, 0.65 * ml_risk_score + 0.35 * heuristic_score)
         except Exception as e:
             evidence.append(EvidenceItem(
                 source="ml_random_forest",

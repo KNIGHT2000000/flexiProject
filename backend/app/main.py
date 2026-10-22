@@ -21,10 +21,15 @@ Base.metadata.create_all(bind=engine)
 logger = logging.getLogger("phishguard.api")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
+# Dynamic root_path for AWS Lambda stage routing (/prod, /staging)
+stage_env = os.getenv("ENVIRONMENT", "prod")
+root_path = f"/{stage_env}" if os.getenv("AWS_LAMBDA_FUNCTION_NAME") else ""
+
 app = FastAPI(
     title="PhishGuard Cloud — AI Phishing Detection & Threat Intelligence Platform",
     description="Enterprise-grade cloud platform for phishing link detection, QR inspection, and threat intelligence correlation.",
     version="2.1.0",
+    root_path=root_path,
 )
 
 # ── CORS Configuration ────────────────────────────────────────────────────────

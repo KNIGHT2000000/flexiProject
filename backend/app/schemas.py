@@ -132,6 +132,12 @@ class EmailHeaderRequest(BaseModel):
 class EmailHeaderResult(BaseModel):
     urls_found: int
     results: list[ScanResult]
+    email_risk_score: Optional[float] = 0.0
+    email_prediction: Optional[str] = "legitimate"
+    lures_detected: list[dict] = Field(default_factory=list)
+    sender: Optional[dict] = None
+    mismatched_links: list[dict] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
 
 
 # ── Leaderboard ───────────────────────────────────────────────────────────────

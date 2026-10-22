@@ -3,6 +3,9 @@ import socket
 import ssl
 import whois
 import difflib
+import math
+import re
+from collections import Counter
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from typing import Optional
@@ -10,13 +13,214 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# Top brands to check for typosquatting
-POPULAR_BRANDS = [
-    "google", "facebook", "amazon", "apple", "microsoft", "paypal",
-    "netflix", "instagram", "twitter", "linkedin", "youtube", "github",
-    "dropbox", "spotify", "ebay", "yahoo", "adobe", "chase", "wellsfargo",
-    "bankofamerica", "citibank", "steam", "roblox", "discord", "tiktok",
-]
+# Top brands catalog for typosquatting and brand camouflage shielding
+KNOWN_BRANDS_CATALOG = {
+    "paypal": {"official": ["paypal.com"], "aliases": ["paypal"]},
+    "apple": {"official": ["apple.com", "icloud.com"], "aliases": ["apple", "appleid", "icloud"]},
+    "microsoft": {"official": ["microsoft.com", "live.com", "office.com", "outlook.com"], "aliases": ["microsoft", "office365", "outlook", "msn"]},
+    "google": {"official": ["google.com", "gmail.com", "youtube.com"], "aliases": ["google", "gmail"]},
+    "amazon": {"official": ["amazon.com", "aws.amazon.com"], "aliases": ["amazon", "primevideo"]},
+    "netflix": {"official": ["netflix.com"], "aliases": ["netflix"]},
+    "chase": {"official": ["chase.com"], "aliases": ["chase", "chasebank"]},
+    "wellsfargo": {"official": ["wellsfargo.com"], "aliases": ["wellsfargo"]},
+    "bankofamerica": {"official": ["bankofamerica.com", "bofa.com"], "aliases": ["bankofamerica", "bofa"]},
+    "citibank": {"official": ["citi.com", "citibank.com"], "aliases": ["citibank", "citi"]},
+    "facebook": {"official": ["facebook.com", "meta.com", "instagram.com", "whatsapp.com"], "aliases": ["facebook", "instagram", "whatsapp", "meta"]},
+    "steam": {"official": ["steampowered.com", "steamcommunity.com"], "aliases": ["steam", "steamcommunity"]},
+    "binance": {"official": ["binance.com"], "aliases": ["binance"]},
+    "coinbase": {"official": ["coinbase.com"], "aliases": ["coinbase"]},
+    "ebay": {"official": ["ebay.com"], "aliases": ["ebay"]},
+    "spotify": {"official": ["spotify.com"], "aliases": ["spotify"]},
+    "twitter": {"official": ["twitter.com", "x.com"], "aliases": ["twitter"]},
+    "linkedin": {"official": ["linkedin.com"], "aliases": ["linkedin"]},
+    "dhl": {"official": ["dhl.com"], "aliases": ["dhl"]},
+    "fedex": {"official": ["fedex.com"], "aliases": ["fedex"]},
+    "ups": {"official": ["ups.com"], "aliases": ["ups"]},
+    "usps": {"official": ["usps.com"], "aliases": ["usps"]},
+    "discord": {"official": ["discord.com", "discord.gg"], "aliases": ["discord"]},
+}
+
+POPULAR_BRANDS = list(KNOWN_BRANDS_CATALOG.keys())
+
+# Free/ephemeral hosting platforms frequently exploited for rapid phishing deployment
+FREE_HOSTING_DOMAINS = {
+    "duckdns.org", "ngrok.io", "ngrok-free.app", "firebaseapp.com", "web.app",
+    "pages.dev", "workers.dev", "vercel.app", "netlify.app", "github.io",
+    "gitlab.io", "glitch.me", "000webhostapp.com", "onrender.com", "surge.sh",
+    "loca.lt", "repl.co", "supabase.co", "weeblysite.com", "wixsite.com",
+}
+
+# Known URL shortener services used to obfuscate destinations
+URL_SHORTENERS = {
+    "bit.ly", "tinyurl.com", "t.co", "cutt.ly", "is.gd", "rb.gy", "ow.ly",
+    "buff.ly", "shorturl.at", "tiny.cc", "rebrand.ly", "goo.gl", "clck.ru",
+    "v.gd", "soo.gd", "s.id", "trib.al",
+}
+
+
+def detect_dga_and_invalid_tld(url: str) -> dict:
+    """
+    Detect Domain Generation Algorithm (DGA) entropy, consonant clustering,
+    deceptive internal subdomain labels (.com.attacker), and invalid/non-ICANN TLDs.
+    """
+    import tldextract
+    ext = tldextract.extract(url)
+    domain = ext.domain.lower() if ext.domain else ""
+    suffix = ext.suffix.lower() if ext.suffix else ""
+    subdomain = ext.subdomain.lower() if ext.subdomain else ""
+
+    # Check 1: Non-existent / unregistered TLD
+    is_invalid_tld = False
+    if not suffix and "." in url:
+        is_invalid_tld = True
+
+    # Check 2: Deceptive .com or .net inside internal subdomain labels
+    deceptive_subdomain = False
+    sub_parts = subdomain.split(".")
+    if any(part in {"com", "net", "org", "gov", "edu", "co", "io"} for part in sub_parts):
+        deceptive_subdomain = True
+
+    # Check 3: Check all hostname labels (domain and subdomains) for consonant clustering & entropy
+    full_host = f"{subdomain}.{domain}.{suffix}".strip(".").lower()
+    labels = [p for p in re.split(r"[-._]", full_host) if p]
+
+    is_dga_gibberish = False
+    dga_reason = ""
+    max_consonants = 0
+    worst_vowel_ratio = 1.0
+    highest_entropy = 0.0
+
+    for label in labels:
+        alpha_chars = [c for c in label if c.isalpha()]
+        vowel_count = sum(1 for c in alpha_chars if c in "aeiou")
+        vowel_ratio = (vowel_count / len(alpha_chars)) if alpha_chars else 1.0
+        consonant_matches = re.findall(r"[bcdfghjklmnpqrstvwxyz]+", label)
+        consonants_len = max((len(c) for c in consonant_matches), default=0)
+
+        entropy = 0.0
+        if len(label) >= 6:
+            counts = Counter(label)
+            n = len(label)
+            entropy = -sum((c / n) * math.log2(c / n) for c in counts.values())
+
+        if consonants_len > max_consonants:
+            max_consonants = consonants_len
+        if vowel_ratio < worst_vowel_ratio:
+            worst_vowel_ratio = vowel_ratio
+        if entropy > highest_entropy:
+            highest_entropy = entropy
+
+        if len(label) >= 8 and (vowel_ratio < 0.12 or consonants_len >= 6):
+            is_dga_gibberish = True
+            dga_reason = f"Label '{label}' has unnatural consonant clustering ({consonants_len} consecutive consonants, {round(vowel_ratio * 100)}% vowels)"
+            break
+        elif len(label) >= 12 and entropy >= 3.6:
+            is_dga_gibberish = True
+            dga_reason = f"Label '{label}' has excessively high random Shannon entropy ({round(entropy, 2)})"
+            break
+
+    return {
+        "is_dga_gibberish": is_dga_gibberish,
+        "dga_reason": dga_reason,
+        "is_invalid_tld": is_invalid_tld,
+        "deceptive_subdomain": deceptive_subdomain,
+        "max_consonants": max_consonants,
+        "vowel_ratio": round(worst_vowel_ratio, 2),
+        "entropy": round(highest_entropy, 2),
+        "suffix": suffix,
+        "domain": domain,
+    }
+
+
+def detect_brand_camouflage(url: str) -> list[dict]:
+    """
+    Brand Camouflage Shield:
+    Identifies unauthorized domains or subdomains spoofing trusted global brands.
+    """
+    import tldextract
+    ext = tldextract.extract(url)
+    registered_domain = f"{ext.domain}.{ext.suffix}".lower()
+    subdomain = ext.subdomain.lower() if ext.subdomain else ""
+    full_host = f"{subdomain}.{ext.domain}.{ext.suffix}".strip(".").lower()
+
+    findings = []
+    for brand, info in KNOWN_BRANDS_CATALOG.items():
+        official_domains = info["official"]
+        # If this is the legitimate brand domain, skip
+        if any(registered_domain == off or full_host.endswith("." + off) for off in official_domains):
+            continue
+
+        for alias in info["aliases"]:
+            # Check 1: Brand keyword embedded in registered domain (e.g. paypal-security, login-apple)
+            if alias in ext.domain.lower():
+                findings.append({
+                    "brand": brand,
+                    "type": "unauthorized_brand_domain",
+                    "description": f"Domain '{ext.domain}' contains trademark brand '{brand}' without authorization.",
+                })
+                break
+            # Check 2: Brand keyword inside subdomain (e.g. paypal.com.attacker.xyz)
+            sub_tokens = [s for s in re.split(r"[-._]", subdomain) if s]
+            if alias in sub_tokens:
+                findings.append({
+                    "brand": brand,
+                    "type": "brand_in_subdomain",
+                    "description": f"Subdomain '{subdomain}' deceptively includes brand name '{brand}'.",
+                })
+                break
+            # Check 3: Typo / Character substitution (e.g. paypa1, arnazon)
+            ratio = difflib.SequenceMatcher(None, ext.domain.lower(), alias).ratio()
+            if 0.75 <= ratio < 1.0:
+                findings.append({
+                    "brand": brand,
+                    "type": "typosquatting",
+                    "similarity": round(ratio * 100, 1),
+                    "description": f"Domain '{ext.domain}' is visually similar to '{brand}' ({round(ratio * 100, 1)}% match).",
+                })
+                break
+    return findings
+
+
+def detect_free_hosting_abuse(url: str) -> Optional[dict]:
+    """
+    Identifies free/ephemeral hosting abuse hosting sensitive authentication paths.
+    """
+    import tldextract
+    from urllib.parse import urlparse
+    ext = tldextract.extract(url)
+    parsed = urlparse(url)
+    registered_domain = f"{ext.domain}.{ext.suffix}".lower()
+
+    if registered_domain in FREE_HOSTING_DOMAINS:
+        path = parsed.path.lower()
+        subdomain = ext.subdomain.lower() if ext.subdomain else ""
+        sensitive_keywords = [
+            "login", "signin", "verify", "account", "update", "secure",
+            "bank", "wallet", "billing", "password", "confirm", "auth", "credential",
+        ]
+        has_sensitive_path = any(kw in path for kw in sensitive_keywords)
+        has_brand_subdomain = any(b in subdomain for b in ["paypal", "apple", "microsoft", "google", "netflix", "chase", "amazon"])
+        if has_sensitive_path or has_brand_subdomain:
+            return {
+                "provider": registered_domain,
+                "has_sensitive_path": has_sensitive_path,
+                "has_brand_subdomain": has_brand_subdomain,
+                "description": f"Free hosting provider '{registered_domain}' is hosting a sensitive credential/login path, a common technique for zero-cost disposable phishing.",
+            }
+    return None
+
+
+def detect_url_shortener(url: str) -> Optional[dict]:
+    """Detects whether URL belongs to a shortener used to conceal destinations."""
+    import tldextract
+    ext = tldextract.extract(url)
+    registered_domain = f"{ext.domain}.{ext.suffix}".lower()
+    if registered_domain in URL_SHORTENERS:
+        return {
+            "provider": registered_domain,
+            "description": f"URL uses shortener service '{registered_domain}' to conceal destination. Exercise caution before visiting.",
+        }
+    return None
 
 
 async def check_virustotal(url: str) -> Optional[dict]:
@@ -92,7 +296,6 @@ def check_whois(url: str) -> dict:
         now_utc = datetime.now(timezone.utc)
         domain_age_days = None
         if creation:
-            # Normalize to naive UTC for safe arithmetic if creation has tz or not
             c_naive = creation.replace(tzinfo=None) if hasattr(creation, "tzinfo") and creation.tzinfo else creation
             domain_age_days = (now_utc.replace(tzinfo=None) - c_naive).days
 
@@ -164,20 +367,7 @@ async def trace_redirects(url: str) -> list[str]:
 
 def check_typosquatting(url: str) -> list[dict]:
     """Compare the domain against popular brands for typosquatting."""
-    parsed = urlparse(url)
-    import tldextract
-    ext = tldextract.extract(url)
-    domain_name = ext.domain.lower()
-
-    matches = []
-    for brand in POPULAR_BRANDS:
-        if domain_name == brand:
-            continue  # exact match — it IS the brand
-        ratio = difflib.SequenceMatcher(None, domain_name, brand).ratio()
-        if ratio >= 0.75:
-            matches.append({"brand": brand, "similarity": round(ratio * 100, 1)})
-
-    return sorted(matches, key=lambda x: -x["similarity"])
+    return detect_brand_camouflage(url)
 
 
 async def capture_screenshot(url: str) -> Optional[str]:
@@ -192,7 +382,7 @@ async def capture_screenshot(url: str) -> Optional[str]:
             screenshot = await page.screenshot(type="jpeg", quality=70, full_page=False)
             await browser.close()
             return base64.b64encode(screenshot).decode()
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -204,6 +394,10 @@ def generate_recommendations(
     ssl_data: dict,
     redirect_chain: list = None,
     typosquatting: list = None,
+    brand_camouflage: list = None,
+    free_hosting: dict = None,
+    dga_data: dict = None,
+    shortener_data: dict = None,
 ) -> list:
     recs = []
 
@@ -211,6 +405,24 @@ def generate_recommendations(
         recs.append("Do NOT visit this URL. It is classified as a phishing site.")
     elif prediction == "suspicious":
         recs.append("Exercise extreme caution. This URL shows multiple suspicious indicators.")
+
+    if brand_camouflage:
+        for b in brand_camouflage:
+            recs.append(b.get("description", f"Brand spoofing detected targeting {b.get('brand')}."))
+
+    if dga_data:
+        if dga_data.get("is_dga_gibberish"):
+            recs.append(f"Domain indicates algorithmic generation (DGA) or keyboard mash: {dga_data.get('dga_reason')}.")
+        if dga_data.get("is_invalid_tld"):
+            recs.append("Domain has an unrecognized or invalid top-level domain (TLD).")
+        if dga_data.get("deceptive_subdomain"):
+            recs.append("URL contains deceptive domain labels (.com/.net) within subdomains to mislead users.")
+
+    if free_hosting:
+        recs.append(free_hosting.get("description", "Disposable free hosting provider used with sensitive path."))
+
+    if shortener_data:
+        recs.append(shortener_data.get("description", "URL shortener detected."))
 
     if features.get("uses_https") == 0:
         recs.append("This site does not use HTTPS. Avoid entering sensitive information.")
@@ -235,8 +447,8 @@ def generate_recommendations(
             f"URL redirects through {len(redirect_chain) - 1} hops — "
             "multi-hop redirects are a common phishing obfuscation technique."
         )
-    if typosquatting:
-        brands = ", ".join(t["brand"] for t in typosquatting[:3])
+    if typosquatting and not brand_camouflage:
+        brands = ", ".join(t.get("brand", "brand") for t in typosquatting[:3])
         recs.append(f"Domain looks similar to well-known brand(s): {brands}. Possible typosquatting.")
 
     if not recs:

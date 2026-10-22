@@ -145,16 +145,18 @@ ${redirect_chain?.length > 1 ? `\n## Redirect Trace\n${redirect_chain.map((hop, 
         </div>
       )}
 
-      {/* Typosquatting */}
+      {/* Brand Camouflage & Typosquatting */}
       {typosquatting?.length > 0 && (
         <div className="card border-l-4 border-orange-600">
           <h3 className="text-sm font-semibold text-orange-400 mb-2 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4" /> Typosquatting Alert
+            <AlertTriangle className="w-4 h-4" /> Brand Camouflage & Spoofing Alert
           </h3>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2">
             {typosquatting.map((t, i) => (
-              <div key={i} className="bg-orange-900/30 border border-orange-800 px-3 py-1 rounded-lg text-xs text-orange-300">
-                Similar to <span className="font-semibold">{t.brand}</span> — {t.similarity}% match
+              <div key={i} className="bg-orange-900/30 border border-orange-800 px-3 py-1.5 rounded-lg text-xs text-orange-300">
+                {t.description || (
+                  <>Similar to <span className="font-semibold">{t.brand}</span> — {t.similarity}% match</>
+                )}
               </div>
             ))}
           </div>

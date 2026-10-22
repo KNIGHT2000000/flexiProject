@@ -406,18 +406,18 @@ def leaderboard(limit: int = Query(10, le=50), db: Session = Depends(get_db)):
 
 
 @router.post("/email-headers", response_model=schemas.EmailHeaderResult)
+@router.post("/email", response_model=schemas.EmailHeaderResult)
 async def analyze_email_headers(
     request: schemas.EmailHeaderRequest,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     import re
-    url_pattern = re.compile(
-        r'https?://[^\s<>"\'\])\}]+'
-    )
+    from app.email_inspector import inspect_email
+
+    # Extract all plaintext and HTML URLs
+    url_pattern = re.compile(r'https?://[^\s<>"\'\])\}]+')
     urls = list(set(url_pattern.findall(request.headers)))
-    if not urls:
-        return schemas.EmailHeaderResult(urls_found=0, results=[])
     if len(urls) > 20:
         urls = urls[:20]
 
@@ -431,4 +431,17 @@ async def analyze_email_headers(
                 url=url, prediction="error", risk_score=0,
                 features={}, recommendations=[str(e)],
             ))
-    return schemas.EmailHeaderResult(urls_found=len(results), results=results)
+
+    # Comprehensive Email Social Engineering & Spoofing Inspection
+    inspection = inspect_email(request.headers, [r.model_dump() for r in results])
+
+    return schemas.EmailHeaderResult(
+        urls_found=len(results),
+        results=results,
+        email_risk_score=inspection.email_risk_score,
+        email_prediction=inspection.email_prediction,
+        lures_detected=inspection.lures_detected,
+        sender=inspection.sender.model_dump(),
+        mismatched_links=[m.model_dump() for m in inspection.mismatched_links],
+        recommendations=inspection.recommendations,
+    )

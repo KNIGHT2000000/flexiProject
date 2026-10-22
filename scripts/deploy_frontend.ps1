@@ -8,7 +8,7 @@ param (
     [string]$ApiEndpoint = "",
     [string]$BucketName = "",
     [string]$DistributionId = "",
-    [string]$Region = "us-east-1"
+    [string]$Region = "ap-southeast-2"
 )
 
 $ErrorActionPreference = "Stop"

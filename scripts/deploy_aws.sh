@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ENVIRONMENT="${1:-prod}"
-REGION="${2:-us-east-1}"
+REGION="${2:-ap-southeast-2}"
 STACK_NAME="phishguard-cloud-${ENVIRONMENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

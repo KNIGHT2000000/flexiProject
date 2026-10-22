@@ -5,7 +5,7 @@
 
 param (
     [string]$Environment = "prod",
-    [string]$Region = "us-east-1",
+    [string]$Region = "ap-southeast-2",
     [string]$StackName = "phishguard-cloud-$Environment"
 )
 

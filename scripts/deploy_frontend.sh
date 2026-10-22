@@ -9,7 +9,7 @@ ENVIRONMENT="${1:-staging}"
 API_ENDPOINT="${2:-}"
 BUCKET_NAME="${3:-}"
 DISTRIBUTION_ID="${4:-}"
-REGION="${5:-us-east-1}"
+REGION="${5:-ap-southeast-2}"
 
 STACK_NAME="phishguard-cloud-${ENVIRONMENT}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

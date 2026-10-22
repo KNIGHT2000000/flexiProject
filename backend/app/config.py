@@ -1,9 +1,11 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from typing import Optional
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     database_url: str = "sqlite:///./phishing.db"
     secret_key: str = "changeme-super-secret-key"
     algorithm: str = "HS256"
@@ -18,10 +20,8 @@ class Settings(BaseSettings):
     smtp_from: str = "phishguard@example.com"
     smtp_tls: bool = True
 
-    class Config:
-        env_file = ".env"
-
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+

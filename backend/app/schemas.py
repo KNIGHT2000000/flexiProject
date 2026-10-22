@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional, Any
 from datetime import datetime
 
@@ -11,15 +11,14 @@ class UserCreate(BaseModel):
 
 
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     email: str
     role: str
     theme: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class UserUpdate(BaseModel):
@@ -65,14 +64,13 @@ class BulkScanResult(BaseModel):
 
 
 class ScanHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     url: str
     prediction: str
     risk_score: float
     scanned_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class ScanHistoryDetail(ScanHistoryOut):
@@ -83,9 +81,6 @@ class ScanHistoryDetail(ScanHistoryOut):
     redirect_chain: Optional[str] = None
     typosquatting: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
 class APIKeyCreate(BaseModel):
@@ -93,14 +88,13 @@ class APIKeyCreate(BaseModel):
 
 
 class APIKeyOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     is_active: bool
     created_at: datetime
     last_used: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 
 class APIKeyCreated(APIKeyOut):
@@ -113,12 +107,11 @@ class WhitelistAdd(BaseModel):
 
 
 class WhitelistOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     domain: str
     added_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # ── Email Alerts ──────────────────────────────────────────────────────────────
@@ -128,8 +121,7 @@ class EmailAlertSettings(BaseModel):
 
 
 class EmailAlertOut(EmailAlertSettings):
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Email Header Analyzer ─────────────────────────────────────────────────────

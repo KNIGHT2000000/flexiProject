@@ -14,6 +14,9 @@ import AdminPanel from "./pages/AdminPanel";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 
+import DNSInspector from "./pages/DNSInspector";
+import SystemStatus from "./pages/SystemStatus";
+
 // Redirects to /login if not authenticated
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth();
@@ -21,7 +24,7 @@ function PrivateRoute({ children }) {
   return user ? children : <Navigate to="/login" replace />;
 }
 
-// Shows landing page to guests, redirects logged-in users to scanner
+// Shows auth pages only to non-authenticated users
 function GuestRoute({ children }) {
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -31,22 +34,24 @@ function GuestRoute({ children }) {
 function AppRoutes() {
   return (
     <Routes>
-      {/* Public landing — guests only */}
-      <Route path="/" element={<GuestRoute><Landing /></GuestRoute>} />
+      {/* Public landing */}
+      <Route path="/" element={<Landing />} />
 
       {/* Auth pages */}
       <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
       <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
 
-      {/* Public pages (no auth required) */}
+      {/* Core Scanners & Threat Tools (available to everyone) */}
+      <Route path="/scanner" element={<WithNav><Scanner /></WithNav>} />
+      <Route path="/bulk" element={<WithNav><BulkScanner /></WithNav>} />
+      <Route path="/dns-lookup" element={<WithNav><DNSInspector /></WithNav>} />
+      <Route path="/email-analyzer" element={<WithNav><EmailAnalyzer /></WithNav>} />
       <Route path="/feed" element={<WithNav><ThreatFeed /></WithNav>} />
       <Route path="/leaderboard" element={<WithNav><Leaderboard /></WithNav>} />
+      <Route path="/system" element={<WithNav><SystemStatus /></WithNav>} />
 
-      {/* Protected pages */}
-      <Route path="/scanner" element={<PrivateRoute><WithNav><Scanner /></WithNav></PrivateRoute>} />
-      <Route path="/bulk" element={<PrivateRoute><WithNav><BulkScanner /></WithNav></PrivateRoute>} />
+      {/* Authenticated user dashboard & management */}
       <Route path="/dashboard" element={<PrivateRoute><WithNav><Dashboard /></WithNav></PrivateRoute>} />
-      <Route path="/email-analyzer" element={<PrivateRoute><WithNav><EmailAnalyzer /></WithNav></PrivateRoute>} />
       <Route path="/settings" element={<PrivateRoute><WithNav><Settings /></WithNav></PrivateRoute>} />
       <Route path="/admin" element={<PrivateRoute><WithNav><AdminPanel /></WithNav></PrivateRoute>} />
 

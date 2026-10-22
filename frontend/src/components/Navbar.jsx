@@ -1,7 +1,7 @@
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Shield, LogOut, User, BarChart2, Sun, Moon, Globe,
-  ListFilter, Key, Settings, ShieldAlert, Trophy
+  ListFilter, Key, Settings, ShieldAlert, Trophy, Activity, SearchCheck
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
@@ -33,8 +33,10 @@ export default function Navbar() {
       <div className="flex items-center gap-4 flex-wrap">
         {navLink("/scanner", "Scanner")}
         {navLink("/bulk", "Bulk Scan")}
+        {navLink("/dns-lookup", "DNS Inspector")}
         {navLink("/feed", "Threat Feed", Globe)}
         {navLink("/leaderboard", "Leaderboard", Trophy)}
+        {navLink("/system", "Status", Activity)}
         {user && navLink("/dashboard", "Dashboard", BarChart2)}
         {user && navLink("/email-analyzer", "Email Analyzer")}
         {user?.role === "admin" && navLink("/admin", "Admin", ShieldAlert)}

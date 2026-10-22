@@ -25,3 +25,4 @@ tldextract==5.1.2
 validators==0.28.1
 slowapi==0.1.9
 mangum==0.22.0
+pyyaml==6.0.3

@@ -94,6 +94,29 @@ export default function Scanner() {
               Scan
             </button>
           </form>
+
+          {/* Quick Test Samples */}
+          <div className="mt-3">
+            <span className="text-xs text-gray-500 mr-2">Try quick samples:</span>
+            <div className="inline-flex gap-1.5 flex-wrap mt-1">
+              {[
+                { label: "🟢 Legitimate", sampleUrl: "https://www.google.com" },
+                { label: "🟡 Suspicious IP", sampleUrl: "http://192.168.1.1/admin/login.php" },
+                { label: "🔴 Phishing", sampleUrl: "http://paypal-verification-account-security.com/login" },
+                { label: "🔍 Typosquat", sampleUrl: "https://g00gle.com" },
+              ].map(({ label, sampleUrl }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setUrl(sampleUrl)}
+                  className="bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs px-2.5 py-1 rounded-md transition-colors border border-gray-700"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <label className="flex items-center gap-2 mt-3 text-sm text-gray-400 cursor-pointer select-none w-fit">
             <input
               type="checkbox"

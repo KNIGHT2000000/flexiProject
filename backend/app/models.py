@@ -1,7 +1,11 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Base
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
 
 
 class User(Base):
@@ -14,7 +18,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     role = Column(String, default="user")          # user | admin
     theme = Column(String, default="dark")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
 
     scans = relationship("ScanHistory", back_populates="user")
     api_keys = relationship("APIKey", back_populates="user")
@@ -35,7 +39,7 @@ class ScanHistory(Base):
     ssl_result = Column(Text)                       # JSON
     redirect_chain = Column(Text)                   # JSON list
     typosquatting = Column(Text)                    # JSON list of brand matches
-    scanned_at = Column(DateTime, default=datetime.utcnow)
+    scanned_at = Column(DateTime, default=_utc_now)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     user = relationship("User", back_populates="scans")
 
@@ -47,7 +51,7 @@ class APIKey(Base):
     key_hash = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_utc_now)
     last_used = Column(DateTime, nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="api_keys")
@@ -58,7 +62,7 @@ class WhitelistedDomain(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     domain = Column(String, nullable=False, index=True)
-    added_at = Column(DateTime, default=datetime.utcnow)
+    added_at = Column(DateTime, default=_utc_now)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user = relationship("User", back_populates="whitelisted_domains")
 
@@ -79,5 +83,6 @@ class BannedDomain(Base):
     id = Column(Integer, primary_key=True, index=True)
     domain = Column(String, unique=True, index=True, nullable=False)
     reason = Column(String, nullable=True)
-    banned_at = Column(DateTime, default=datetime.utcnow)
+    banned_at = Column(DateTime, default=_utc_now)
     banned_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+

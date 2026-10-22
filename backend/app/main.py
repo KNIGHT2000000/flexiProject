@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.database import engine, Base
-from app.routers import auth, scan, apikeys, whitelist, alerts, admin, users, analyze
+from app.routers import auth, scan, apikeys, whitelist, alerts, admin, users, analyze, threat
 
 # Ensure database tables exist
 Base.metadata.create_all(bind=engine)
@@ -155,6 +155,7 @@ app.include_router(whitelist.router)
 app.include_router(alerts.router)
 app.include_router(admin.router)
 app.include_router(users.router)
+app.include_router(threat.router)
 
 
 @app.get("/")

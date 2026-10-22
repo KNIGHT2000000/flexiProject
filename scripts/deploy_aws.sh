@@ -42,9 +42,9 @@ STACK_JSON=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --r
 API_ENDPOINT=$(echo "${STACK_JSON}" | jq -r '.Stacks[0].Outputs[] | select(.OutputKey=="ApiEndpoint") | .OutputValue')
 BUCKET_NAME=$(echo "${STACK_JSON}" | jq -r '.Stacks[0].Outputs[] | select(.OutputKey=="FrontendBucketName") | .OutputValue')
 DIST_ID=$(echo "${STACK_JSON}" | jq -r '.Stacks[0].Outputs[] | select(.OutputKey=="CloudFrontDistributionId") | .OutputValue')
-CF_URL=$(echo "${STACK_JSON}" | jq -r '.Stacks[0].Outputs[] | select(.OutputKey=="CloudFrontDomainName") | .OutputValue')
+CF_URL=$(echo "${STACK_JSON}" | jq -r '.Stacks[0].Outputs[] | select(.OutputKey=="CloudFrontDomain" or .OutputKey=="CloudFrontDomainName") | .OutputValue')
 
-echo "  API Gateway: https://${API_ENDPOINT}"
+echo "  API Gateway: ${API_ENDPOINT}"
 echo "  Frontend Bucket: ${BUCKET_NAME}"
 echo "  CloudFront URL: https://${CF_URL}"
 

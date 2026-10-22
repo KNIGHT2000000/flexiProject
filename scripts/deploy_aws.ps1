@@ -70,7 +70,7 @@ $outputs = $stackJson.Stacks[0].Outputs
 $apiEndpoint = ($outputs | Where-Object { $_.OutputKey -eq "ApiEndpoint" }).OutputValue
 $bucketName = ($outputs | Where-Object { $_.OutputKey -eq "FrontendBucketName" }).OutputValue
 $distributionId = ($outputs | Where-Object { $_.OutputKey -eq "CloudFrontDistributionId" }).OutputValue
-$cloudFrontUrl = ($outputs | Where-Object { $_.OutputKey -eq "CloudFrontDomainName" }).OutputValue
+$cloudFrontUrl = ($outputs | Where-Object { $_.OutputKey -in @("CloudFrontDomain", "CloudFrontDomainName") }).OutputValue
 
 Write-Host "  Deployed Endpoints:" -ForegroundColor Cyan
 Write-Host "    API Gateway URL:     $apiEndpoint"

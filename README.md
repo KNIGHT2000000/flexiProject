@@ -31,7 +31,7 @@ A professional-grade cybersecurity platform that detects phishing URLs in real t
 | Database | PostgreSQL (production) / SQLite (development & serverless) |
 | Auth | JWT (python-jose, bcrypt, passlib) |
 | Threat Intel | VirusTotal API v3, dnspython, python-whois, pyOpenSSL |
-| QR Scanning | pyzbar, Pillow |
+| QR Scanning | pyzbar, pillow |
 | Cloud & Deployment | Render, Vercel, Docker, AWS SAM (Lambda + CloudFront + S3) |
 
 ---
